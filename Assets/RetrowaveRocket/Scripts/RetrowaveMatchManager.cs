@@ -78,7 +78,7 @@ namespace RetrowaveRocket
             NetworkVariableReadPermission.Everyone,
             NetworkVariableWritePermission.Server);
 
-        private NetworkList<RetrowaveLobbyEntry> _lobbyEntries;
+        private readonly NetworkList<RetrowaveLobbyEntry> _lobbyEntries = new();
         private bool _worldSpawned;
         private bool _resetQueued;
         private float _pingRefreshTimer;
@@ -100,11 +100,6 @@ namespace RetrowaveRocket
         public bool IsGoalCelebrationActive => _goalCelebrationActive.Value;
         public NetworkList<RetrowaveLobbyEntry> LobbyEntries => _lobbyEntries;
         public bool CanStartMatch => GetTeamCount(RetrowaveTeam.Blue) > 0 && GetTeamCount(RetrowaveTeam.Orange) > 0;
-
-        private void Awake()
-        {
-            _lobbyEntries = new NetworkList<RetrowaveLobbyEntry>();
-        }
 
         public override void OnDestroy()
         {
@@ -163,6 +158,7 @@ namespace RetrowaveRocket
             NetworkManager.Singleton.OnClientDisconnectCallback += HandleClientDisconnected;
 
             SpawnWorldActors();
+            EnsureLobbyEntry(NetworkManager.ServerClientId);
 
             foreach (var clientPair in NetworkManager.Singleton.ConnectedClients)
             {
@@ -263,6 +259,40 @@ namespace RetrowaveRocket
             RequestStartMatchServerRpc();
         }
 
+        public void HandlePlayerObjectSpawned(ulong clientId)
+        {
+            if (!IsServer)
+            {
+                return;
+            }
+
+            EnsureLobbyEntry(clientId);
+            RecalculateSpawnSlots();
+        }
+
+        public void HandlePlayerRoleSelection(ulong clientId, RetrowaveLobbyRole role)
+        {
+            if (!IsServer)
+            {
+                return;
+            }
+
+            EnsureLobbyEntry(clientId);
+
+            var index = GetLobbyEntryIndex(clientId);
+
+            if (index < 0)
+            {
+                return;
+            }
+
+            var entry = _lobbyEntries[index];
+            entry.RoleValue = (int)role;
+            entry.HasSelectedRole = true;
+            _lobbyEntries[index] = entry;
+            RecalculateSpawnSlots();
+        }
+
         public bool TryGetLobbyEntry(ulong clientId, out RetrowaveLobbyEntry entry)
         {
             var index = GetLobbyEntryIndex(clientId);
@@ -292,30 +322,15 @@ namespace RetrowaveRocket
             return count;
         }
 
-        [Rpc(SendTo.Server)]
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
         private void SubmitRoleSelectionServerRpc(int roleValue, RpcParams rpcParams = default)
         {
             var clientId = rpcParams.Receive.SenderClientId;
             var role = (RetrowaveLobbyRole)Mathf.Clamp(roleValue, (int)RetrowaveLobbyRole.Spectator, (int)RetrowaveLobbyRole.Orange);
-
-            EnsureLobbyEntry(clientId);
-
-            var index = GetLobbyEntryIndex(clientId);
-
-            if (index < 0)
-            {
-                return;
-            }
-
-            var entry = _lobbyEntries[index];
-            entry.RoleValue = (int)role;
-            entry.HasSelectedRole = true;
-            _lobbyEntries[index] = entry;
-
-            ApplyRoleForClient(clientId, role);
+            HandlePlayerRoleSelection(clientId, role);
         }
 
-        [Rpc(SendTo.Server)]
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
         private void RequestStartMatchServerRpc(RpcParams rpcParams = default)
         {
             if (rpcParams.Receive.SenderClientId != NetworkManager.ServerClientId || !CanStartMatch)
@@ -328,7 +343,9 @@ namespace RetrowaveRocket
 
         private void HandleClientConnected(ulong clientId)
         {
+            EnsureLobbyEntry(NetworkManager.ServerClientId);
             EnsureLobbyEntry(clientId);
+            RecalculateSpawnSlots();
         }
 
         private void HandleClientDisconnected(ulong clientId)
@@ -375,27 +392,15 @@ namespace RetrowaveRocket
                 return;
             }
 
-            if (role == RetrowaveLobbyRole.Spectator)
+            if (client.PlayerObject == null || !client.PlayerObject.TryGetComponent<RetrowavePlayerController>(out var player))
             {
-                if (client.PlayerObject != null)
-                {
-                    var playerNetworkObject = client.PlayerObject.GetComponent<NetworkObject>();
-                    playerNetworkObject.Despawn(true);
-                }
-
-                RecalculateSpawnSlots();
                 return;
             }
 
-            if (client.PlayerObject == null)
+            if (role == RetrowaveLobbyRole.Spectator)
             {
-                var playerObject = Instantiate(RetrowaveGameBootstrap.Instance.PlayerPrefab);
-                playerObject.name = $"{role} Player {clientId}";
-                playerObject.SetActive(true);
-                playerObject.GetComponent<NetworkObject>().SpawnAsPlayerObject(clientId, true);
+                player.SetSpectatorStateServer(true);
             }
-
-            RecalculateSpawnSlots();
         }
 
         private void StartMatch()
@@ -426,21 +431,21 @@ namespace RetrowaveRocket
 
             _worldSpawned = true;
 
-            var ball = Instantiate(RetrowaveGameBootstrap.Instance.BallPrefab);
+            var ball = RetrowaveGameBootstrap.Instance.CreateBallInstance();
             ball.name = "Match Ball";
-            ball.SetActive(true);
+            RetrowaveGameBootstrap.Instance.MoveRuntimeInstanceToGameplayScene(ball);
             ball.GetComponent<NetworkObject>().Spawn();
             ball.GetComponent<RetrowaveBall>().ResetBall();
 
             for (var i = 0; i < RetrowaveArenaConfig.PowerUpPositions.Length; i++)
             {
-                var powerUpObject = Instantiate(
-                    RetrowaveGameBootstrap.Instance.PowerUpPrefab,
+                var powerUpObject = RetrowaveGameBootstrap.Instance.CreatePowerUpInstance();
+                powerUpObject.transform.SetPositionAndRotation(
                     RetrowaveArenaConfig.PowerUpPositions[i],
                     Quaternion.Euler(45f, i * 12f, 45f));
 
                 powerUpObject.name = $"PowerUp {i}";
-                powerUpObject.SetActive(true);
+                RetrowaveGameBootstrap.Instance.MoveRuntimeInstanceToGameplayScene(powerUpObject);
                 powerUpObject.GetComponent<NetworkObject>().Spawn();
                 powerUpObject.GetComponent<RetrowavePowerUp>().InitializeServer(
                     i % 2 == 0 ? RetrowavePowerUpType.BoostRefill : RetrowavePowerUpType.SpeedBurst);
@@ -497,11 +502,6 @@ namespace RetrowaveRocket
 
             foreach (var clientId in GetSortedConnectedClientIds())
             {
-                if (!TryGetAssignedTeam(clientId, out var team))
-                {
-                    continue;
-                }
-
                 var client = NetworkManager.Singleton.ConnectedClients[clientId];
 
                 if (client.PlayerObject == null)
@@ -514,8 +514,14 @@ namespace RetrowaveRocket
                     continue;
                 }
 
-                var spawnIndex = team == RetrowaveTeam.Blue ? blueSlot++ : orangeSlot++;
-                player.ConfigureServer(team, spawnIndex);
+                if (TryGetAssignedTeam(clientId, out var team))
+                {
+                    var spawnIndex = team == RetrowaveTeam.Blue ? blueSlot++ : orangeSlot++;
+                    player.ConfigureServer(team, spawnIndex);
+                    continue;
+                }
+
+                player.SetSpectatorStateServer(TryGetLobbyEntry(clientId, out var entry) && entry.HasSelectedRole);
             }
         }
 
@@ -698,6 +704,11 @@ namespace RetrowaveRocket
 
         private int GetLobbyEntryIndex(ulong clientId)
         {
+            if (_lobbyEntries == null)
+            {
+                return -1;
+            }
+
             for (var i = 0; i < _lobbyEntries.Count; i++)
             {
                 if (_lobbyEntries[i].ClientId == clientId)

@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Net;
@@ -18,6 +19,37 @@ namespace RetrowaveRocket
 {
     public sealed class RetrowaveGameBootstrap : MonoBehaviour
     {
+        private sealed class RuntimePrefabHandler : INetworkPrefabInstanceHandler
+        {
+            private readonly Func<GameObject> _factory;
+
+            public RuntimePrefabHandler(Func<GameObject> factory)
+            {
+                _factory = factory;
+            }
+
+            public NetworkObject Instantiate(ulong ownerClientId, Vector3 position, Quaternion rotation)
+            {
+                var instance = _factory?.Invoke();
+
+                if (instance == null)
+                {
+                    return null;
+                }
+
+                instance.transform.SetPositionAndRotation(position, rotation);
+                return instance.GetComponent<NetworkObject>();
+            }
+
+            public void Destroy(NetworkObject networkObject)
+            {
+                if (networkObject != null)
+                {
+                    UnityEngine.Object.Destroy(networkObject.gameObject);
+                }
+            }
+        }
+
         private enum PendingConnectionMode
         {
             None = 0,
@@ -33,7 +65,6 @@ namespace RetrowaveRocket
 
         private NetworkManager _networkManager;
         private UnityTransport _transport;
-        private Transform _prefabRoot;
         private GameObject _playerPrefab;
         private GameObject _ballPrefab;
         private GameObject _powerUpPrefab;
@@ -65,6 +96,7 @@ namespace RetrowaveRocket
         private Button _gameplayReturnButton;
         private TMP_Text _gameplayStartButtonLabel;
         private bool _gameplayMenuWasVisible;
+        private float _serverSessionReconcileTimer;
 
         public static RetrowaveGameBootstrap Instance => _instance;
         public GameObject PlayerPrefab => _playerPrefab;
@@ -147,33 +179,44 @@ namespace RetrowaveRocket
                 ClearGoalCelebrationState();
             }
 
+            if (_networkManager.IsServer)
+            {
+                _serverSessionReconcileTimer -= Time.unscaledDeltaTime;
+
+                if (_serverSessionReconcileTimer <= 0f)
+                {
+                    _serverSessionReconcileTimer = 0.25f;
+                    ReconcileServerSessionState();
+                }
+            }
+
             RefreshGameplayMenuState();
         }
 
         private void HandleRoleSelectionHotkeys(Keyboard keyboard)
         {
-            if (!RequiresRoleSelection() || RetrowaveMatchManager.Instance == null)
+            if (!RequiresRoleSelection())
             {
                 return;
             }
 
             if (keyboard.digit1Key.wasPressedThisFrame || keyboard.numpad1Key.wasPressedThisFrame || keyboard.bKey.wasPressedThisFrame)
             {
-                RetrowaveMatchManager.Instance.RequestRoleSelection(RetrowaveLobbyRole.Blue);
+                TryRequestRoleSelection(RetrowaveLobbyRole.Blue);
                 _showPauseMenu = false;
                 return;
             }
 
             if (keyboard.digit2Key.wasPressedThisFrame || keyboard.numpad2Key.wasPressedThisFrame || keyboard.oKey.wasPressedThisFrame)
             {
-                RetrowaveMatchManager.Instance.RequestRoleSelection(RetrowaveLobbyRole.Orange);
+                TryRequestRoleSelection(RetrowaveLobbyRole.Orange);
                 _showPauseMenu = false;
                 return;
             }
 
             if (keyboard.digit3Key.wasPressedThisFrame || keyboard.numpad3Key.wasPressedThisFrame || keyboard.sKey.wasPressedThisFrame)
             {
-                RetrowaveMatchManager.Instance.RequestRoleSelection(RetrowaveLobbyRole.Spectator);
+                TryRequestRoleSelection(RetrowaveLobbyRole.Spectator);
                 _showPauseMenu = false;
             }
         }
@@ -182,6 +225,12 @@ namespace RetrowaveRocket
         {
             if (_instance == this)
             {
+                if (_networkManager != null)
+                {
+                    _networkManager.OnServerStarted -= HandleServerStarted;
+                    _networkManager.OnClientConnectedCallback -= HandleNetworkClientConnected;
+                }
+
                 SceneManager.sceneLoaded -= HandleSceneLoaded;
                 ClearGoalCelebrationState();
                 DestroyGameplayMenuOverlay();
@@ -288,8 +337,14 @@ namespace RetrowaveRocket
             RegisterNetworkPrefab(_ballPrefab);
             RegisterNetworkPrefab(_powerUpPrefab);
             RegisterNetworkPrefab(_matchManagerPrefab);
+            RegisterRuntimePrefabHandler(_playerPrefab, CreatePlayerInstance);
+            RegisterRuntimePrefabHandler(_ballPrefab, CreateBallInstance);
+            RegisterRuntimePrefabHandler(_powerUpPrefab, CreatePowerUpInstance);
+            RegisterRuntimePrefabHandler(_matchManagerPrefab, CreateMatchManagerInstance);
+            _networkManager.NetworkConfig.PlayerPrefab = null;
 
             _networkManager.OnServerStarted += HandleServerStarted;
+            _networkManager.OnClientConnectedCallback += HandleNetworkClientConnected;
         }
 
         private bool BeginConnectionFromMenu(PendingConnectionMode mode, string address, string portText, out string message)
@@ -332,19 +387,10 @@ namespace RetrowaveRocket
                 return;
             }
 
-            var prefabRootObject = new GameObject("Retrowave Runtime Prefabs");
-            prefabRootObject.transform.SetParent(transform, false);
-            DontDestroyOnLoad(prefabRootObject);
-            _prefabRoot = prefabRootObject.transform;
-
             _playerPrefab = CreatePlayerPrefab();
             _ballPrefab = CreateBallPrefab();
             _powerUpPrefab = CreatePowerUpPrefab();
             _matchManagerPrefab = CreateMatchManagerPrefab();
-            _playerPrefab.transform.SetParent(_prefabRoot, false);
-            _ballPrefab.transform.SetParent(_prefabRoot, false);
-            _powerUpPrefab.transform.SetParent(_prefabRoot, false);
-            _matchManagerPrefab.transform.SetParent(_prefabRoot, false);
         }
 
         private void RegisterNetworkPrefab(GameObject prefab)
@@ -357,17 +403,133 @@ namespace RetrowaveRocket
             _networkManager.AddNetworkPrefab(prefab);
         }
 
-        private void HandleServerStarted()
+        private void RegisterRuntimePrefabHandler(GameObject prefab, Func<GameObject> factory)
         {
-            if (!_networkManager.IsServer || RetrowaveMatchManager.Instance != null)
+            if (prefab == null || factory == null)
             {
                 return;
             }
 
-            var matchManager = Instantiate(_matchManagerPrefab);
+            _networkManager.PrefabHandler.AddHandler(prefab, new RuntimePrefabHandler(factory));
+        }
+
+        private void HandleServerStarted()
+        {
+            if (!_networkManager.IsServer)
+            {
+                return;
+            }
+
+            EnsureServerSessionStateForClient(NetworkManager.ServerClientId);
+
+            foreach (var clientPair in _networkManager.ConnectedClients)
+            {
+                EnsureServerSessionStateForClient(clientPair.Key);
+            }
+        }
+
+        private void HandleNetworkClientConnected(ulong clientId)
+        {
+            if (_networkManager == null || !_networkManager.IsServer)
+            {
+                return;
+            }
+
+            EnsureServerSessionStateForClient(clientId);
+        }
+
+        private void EnsureServerSessionStateForClient(ulong clientId)
+        {
+            if (_networkManager == null || !_networkManager.IsServer || !_networkManager.IsListening)
+            {
+                return;
+            }
+
+            EnsureServerMatchManagerExists();
+            EnsureServerPlayerObjectExists(clientId);
+        }
+
+        private void ReconcileServerSessionState()
+        {
+            if (_networkManager == null || !_networkManager.IsServer || !_networkManager.IsListening)
+            {
+                return;
+            }
+
+            EnsureServerMatchManagerExists();
+
+            foreach (var clientPair in _networkManager.ConnectedClients)
+            {
+                EnsureServerPlayerObjectExists(clientPair.Key);
+            }
+        }
+
+        private void EnsureServerMatchManagerExists()
+        {
+            if (GetActiveMatchManager() != null)
+            {
+                return;
+            }
+
+            var matchManager = CreateMatchManagerInstance();
             matchManager.name = "Retrowave Match Manager";
-            matchManager.SetActive(true);
+            MoveRuntimeInstanceToGameplayScene(matchManager);
             matchManager.GetComponent<NetworkObject>().Spawn();
+        }
+
+        private void EnsureServerPlayerObjectExists(ulong clientId)
+        {
+            if (!_networkManager.ConnectedClients.TryGetValue(clientId, out var client) || client.PlayerObject != null)
+            {
+                return;
+            }
+
+            var playerObject = CreatePlayerInstance();
+            playerObject.name = $"Player {clientId}";
+            MoveRuntimeInstanceToGameplayScene(playerObject);
+            playerObject.GetComponent<NetworkObject>().SpawnAsPlayerObject(clientId, true);
+        }
+
+        public GameObject CreatePlayerInstance()
+        {
+            return CreatePlayerPrefab(false);
+        }
+
+        public GameObject CreateBallInstance()
+        {
+            return CreateBallPrefab(false);
+        }
+
+        public GameObject CreatePowerUpInstance()
+        {
+            return CreatePowerUpPrefab(false);
+        }
+
+        public GameObject CreateMatchManagerInstance()
+        {
+            return CreateMatchManagerPrefab(false);
+        }
+
+        public void MoveRuntimeInstanceToGameplayScene(GameObject instance)
+        {
+            if (instance == null)
+            {
+                return;
+            }
+
+            var gameplayScene = SceneManager.GetSceneByName(GameplaySceneName);
+
+            if (!gameplayScene.IsValid() || !gameplayScene.isLoaded)
+            {
+                gameplayScene = SceneManager.GetActiveScene();
+            }
+
+            if (!gameplayScene.IsValid() || !gameplayScene.isLoaded || instance.scene == gameplayScene)
+            {
+                return;
+            }
+
+            SceneManager.MoveGameObjectToScene(instance, gameplayScene);
         }
 
         private void DrawHud()
@@ -378,7 +540,7 @@ namespace RetrowaveRocket
             GUILayout.Label($"{status} connected on {_address}:{_port}");
             GUILayout.Label("Esc: match menu    Tab: scoreboard");
 
-            var matchManager = RetrowaveMatchManager.Instance;
+            var matchManager = GetActiveMatchManager();
 
             if (matchManager != null)
             {
@@ -404,6 +566,16 @@ namespace RetrowaveRocket
             else
             {
                 GUILayout.Label("Waiting for match manager...");
+
+                if (RetrowavePlayerController.LocalPlayer != null)
+                {
+                    GUILayout.Label($"Role: {GetRoleLabel(RetrowavePlayerController.LocalPlayer.LobbyRole, RetrowavePlayerController.LocalPlayer.HasSelectedRole)}");
+
+                    if (!RetrowavePlayerController.LocalPlayer.HasSelectedRole)
+                    {
+                        GUILayout.Label("Choose a team or spectate to enter the lobby.");
+                    }
+                }
             }
 
             if (RetrowavePlayerController.LocalOwner != null)
@@ -540,12 +712,13 @@ namespace RetrowaveRocket
                 return;
             }
 
+            var sessionBootstrapPending = RequiresSessionBootstrap();
             var forceSelection = RequiresRoleSelection();
             var wasVisible = _gameplayMenuWasVisible;
             var isVisible = _networkManager != null
                             && _networkManager.IsListening
                             && IsGameplayScene(SceneManager.GetActiveScene())
-                            && (_showPauseMenu || forceSelection);
+                            && (_showPauseMenu || forceSelection || sessionBootstrapPending);
 
             SetGameplayMenuVisible(isVisible);
             _gameplayMenuWasVisible = isVisible;
@@ -555,14 +728,23 @@ namespace RetrowaveRocket
                 return;
             }
 
-            var matchManager = RetrowaveMatchManager.Instance;
-            _gameplayMenuTitleText.text = forceSelection ? "Choose Your Role" : "Match Menu";
-            _gameplayMenuBodyText.text = forceSelection
-                ? "Pick blue, orange, or spectator before jumping fully into the lobby."
-                : "Swap teams, spectate, or control the match flow from here.";
-            _gameplayMenuHintText.text = forceSelection
-                ? "Keyboard also works: 1 / B = Blue, 2 / O = Orange, 3 / S = Spectator"
-                : "Esc closes this menu after you've chosen a role.";
+            var matchManager = GetActiveMatchManager();
+            if (sessionBootstrapPending)
+            {
+                _gameplayMenuTitleText.text = "Joining Server";
+                _gameplayMenuBodyText.text = "Waiting for the host to finish syncing the lobby and your player object.";
+                _gameplayMenuHintText.text = "This should resolve automatically once the server finishes session setup.";
+            }
+            else
+            {
+                _gameplayMenuTitleText.text = forceSelection ? "Choose Your Role" : "Match Menu";
+                _gameplayMenuBodyText.text = forceSelection
+                    ? "Pick blue, orange, or spectator before jumping fully into the lobby."
+                    : "Swap teams, spectate, or control the match flow from here.";
+                _gameplayMenuHintText.text = forceSelection
+                    ? "Keyboard also works: 1 / B = Blue, 2 / O = Orange, 3 / S = Spectator"
+                    : "Esc closes this menu after you've chosen a role.";
+            }
 
             var hostCanStart = false;
             var hostIsPresent = false;
@@ -574,7 +756,7 @@ namespace RetrowaveRocket
             }
 
             _gameplayStartButton.gameObject.SetActive(hostIsPresent);
-            _gameplayResumeButton.gameObject.SetActive(!forceSelection);
+            _gameplayResumeButton.gameObject.SetActive(!forceSelection && !sessionBootstrapPending);
 
             if (_gameplayStartButtonLabel != null && matchManager != null)
             {
@@ -582,11 +764,16 @@ namespace RetrowaveRocket
             }
 
             _gameplayStartButton.interactable = hostCanStart;
-            _gameplayBlueButton.interactable = matchManager != null;
-            _gameplayOrangeButton.interactable = matchManager != null;
-            _gameplaySpectateButton.interactable = matchManager != null;
+            var canSubmitRoleSelection = !sessionBootstrapPending && (RetrowavePlayerController.LocalPlayer != null || matchManager != null);
+            _gameplayBlueButton.interactable = canSubmitRoleSelection;
+            _gameplayOrangeButton.interactable = canSubmitRoleSelection;
+            _gameplaySpectateButton.interactable = canSubmitRoleSelection;
 
-            if (forceSelection)
+            if (sessionBootstrapPending)
+            {
+                _gameplayMenuFooterText.text = "Connected to the host. Waiting for the multiplayer session to finish initializing.";
+            }
+            else if (forceSelection)
             {
                 _gameplayMenuFooterText.text = "Use the buttons above to enter the arena.";
             }
@@ -623,22 +810,20 @@ namespace RetrowaveRocket
 
         private void SelectGameplayRole(RetrowaveLobbyRole role)
         {
-            if (RetrowaveMatchManager.Instance != null)
-            {
-                RetrowaveMatchManager.Instance.RequestRoleSelection(role);
-            }
-
+            TryRequestRoleSelection(role);
             _showPauseMenu = false;
         }
 
         private void HandleGameplayStartMatch()
         {
-            if (RetrowaveMatchManager.Instance == null)
+            var matchManager = GetActiveMatchManager();
+
+            if (matchManager == null)
             {
                 return;
             }
 
-            RetrowaveMatchManager.Instance.RequestStartMatch();
+            matchManager.RequestStartMatch();
             _showPauseMenu = false;
         }
 
@@ -773,7 +958,7 @@ namespace RetrowaveRocket
         private void DrawPauseMenu()
         {
             var forceSelection = RequiresRoleSelection();
-            var matchManager = RetrowaveMatchManager.Instance;
+            var matchManager = GetActiveMatchManager();
             var title = forceSelection ? "Choose Your Role" : "Match Menu";
 
             GUILayout.BeginArea(new Rect(Screen.width * 0.5f - 210f, 70f, 420f, 340f), GUI.skin.window);
@@ -837,17 +1022,13 @@ namespace RetrowaveRocket
                 return;
             }
 
-            if (RetrowaveMatchManager.Instance != null)
-            {
-                RetrowaveMatchManager.Instance.RequestRoleSelection(role);
-            }
-
+            TryRequestRoleSelection(role);
             _showPauseMenu = false;
         }
 
         private void DrawScoreboard()
         {
-            var matchManager = RetrowaveMatchManager.Instance;
+            var matchManager = GetActiveMatchManager();
 
             if (matchManager == null)
             {
@@ -963,7 +1144,7 @@ namespace RetrowaveRocket
 
         private bool TryGetLocalLobbyEntry(out RetrowaveLobbyEntry entry)
         {
-            var matchManager = RetrowaveMatchManager.Instance;
+            var matchManager = GetActiveMatchManager();
 
             if (matchManager != null && _networkManager != null && _networkManager.IsListening)
             {
@@ -974,15 +1155,29 @@ namespace RetrowaveRocket
             return false;
         }
 
+        private bool RequiresSessionBootstrap()
+        {
+            return _networkManager != null
+                   && _networkManager.IsListening
+                   && !_networkManager.IsServer
+                   && (GetActiveMatchManager() == null || RetrowavePlayerController.LocalPlayer == null);
+        }
+
         private bool RequiresRoleSelection()
         {
+            if (RetrowavePlayerController.LocalPlayer != null)
+            {
+                return !RetrowavePlayerController.LocalPlayer.HasSelectedRole;
+            }
+
             return TryGetLocalLobbyEntry(out var entry) && !entry.HasSelectedRole;
         }
 
         private bool ShouldBlockGameplayInput()
         {
+            var matchManager = GetActiveMatchManager();
             var celebrationActive = _goalCelebrationVisible
-                                    || (RetrowaveMatchManager.Instance != null && RetrowaveMatchManager.Instance.IsGoalCelebrationActive);
+                                    || (matchManager != null && matchManager.IsGoalCelebrationActive);
 
             return _networkManager != null
                    && _networkManager.IsListening
@@ -992,17 +1187,64 @@ namespace RetrowaveRocket
 
         private static string GetRoleLabel(RetrowaveLobbyEntry entry)
         {
-            if (!entry.HasSelectedRole)
+            return GetRoleLabel(entry.Role, entry.HasSelectedRole);
+        }
+
+        private static string GetRoleLabel(RetrowaveLobbyRole role, bool hasSelectedRole)
+        {
+            if (!hasSelectedRole)
             {
                 return "Unassigned";
             }
 
-            return entry.Role switch
+            return role switch
             {
                 RetrowaveLobbyRole.Blue => "Blue Team",
                 RetrowaveLobbyRole.Orange => "Orange Team",
                 _ => "Spectator",
             };
+        }
+
+        private RetrowaveMatchManager GetActiveMatchManager()
+        {
+            if (RetrowaveMatchManager.Instance != null)
+            {
+                return RetrowaveMatchManager.Instance;
+            }
+
+            if (_networkManager?.SpawnManager == null)
+            {
+                return null;
+            }
+
+            foreach (var networkObject in _networkManager.SpawnManager.SpawnedObjectsList)
+            {
+                if (networkObject != null && networkObject.TryGetComponent<RetrowaveMatchManager>(out var matchManager))
+                {
+                    return matchManager;
+                }
+            }
+
+            return null;
+        }
+
+        private bool TryRequestRoleSelection(RetrowaveLobbyRole role)
+        {
+            if (RetrowavePlayerController.LocalPlayer != null)
+            {
+                RetrowavePlayerController.LocalPlayer.RequestRoleSelection(role);
+                return true;
+            }
+
+            var matchManager = GetActiveMatchManager();
+
+            if (matchManager != null)
+            {
+                matchManager.RequestRoleSelection(role);
+                return true;
+            }
+
+            return false;
         }
 
         private void ShutdownSession()
@@ -1152,7 +1394,7 @@ namespace RetrowaveRocket
             return scene.name == GameplaySceneName;
         }
 
-        private static GameObject CreatePlayerPrefab()
+        private static GameObject CreatePlayerPrefab(bool isTemplate = true)
         {
             var prefab = new GameObject("RT Player Cube");
             prefab.name = "RT Player Cube";
@@ -1182,6 +1424,7 @@ namespace RetrowaveRocket
 
             prefab.AddComponent<NetworkObject>();
             prefab.AddComponent<NetworkTransform>();
+            prefab.AddComponent<NetworkRigidbody>();
             prefab.AddComponent<RetrowavePlayerController>();
 
             var visual = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -1206,11 +1449,11 @@ namespace RetrowaveRocket
 
             CreateBoosterVisual(visual.transform, new Vector3(-0.35f, 0f, -0.85f));
             CreateBoosterVisual(visual.transform, new Vector3(0.35f, 0f, -0.85f));
-            FinalizeRuntimePrefab(prefab, 0xA1000001u);
+            FinalizeRuntimePrefab(prefab, 0xA1000001u, isTemplate);
             return prefab;
         }
 
-        private static GameObject CreateBallPrefab()
+        private static GameObject CreateBallPrefab(bool isTemplate = true)
         {
             var prefab = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             prefab.name = "RT Ball";
@@ -1237,17 +1480,18 @@ namespace RetrowaveRocket
 
             prefab.AddComponent<NetworkObject>();
             prefab.AddComponent<NetworkTransform>();
+            prefab.AddComponent<NetworkRigidbody>();
             prefab.AddComponent<RetrowaveBall>();
             prefab.GetComponent<MeshRenderer>().sharedMaterial = RetrowaveStyle.CreateLitMaterial(
                 new Color(0.95f, 0.85f, 0.98f),
                 new Color(0.45f, 0.7f, 1f) * 2.7f,
                 0.95f,
                 0.02f);
-            FinalizeRuntimePrefab(prefab, 0xA1000002u);
+            FinalizeRuntimePrefab(prefab, 0xA1000002u, isTemplate);
             return prefab;
         }
 
-        private static GameObject CreatePowerUpPrefab()
+        private static GameObject CreatePowerUpPrefab(bool isTemplate = true)
         {
             var prefab = GameObject.CreatePrimitive(PrimitiveType.Cube);
             prefab.name = "RT PowerUp";
@@ -1266,17 +1510,17 @@ namespace RetrowaveRocket
                 new Color(0.95f, 0.4f, 1f) * 2.5f,
                 0.9f,
                 0f);
-            FinalizeRuntimePrefab(prefab, 0xA1000003u);
+            FinalizeRuntimePrefab(prefab, 0xA1000003u, isTemplate);
             return prefab;
         }
 
-        private static GameObject CreateMatchManagerPrefab()
+        private static GameObject CreateMatchManagerPrefab(bool isTemplate = true)
         {
             var prefab = new GameObject("RT Match Manager");
             prefab.SetActive(false);
             prefab.AddComponent<NetworkObject>();
             prefab.AddComponent<RetrowaveMatchManager>();
-            FinalizeRuntimePrefab(prefab, 0xA1000004u);
+            FinalizeRuntimePrefab(prefab, 0xA1000004u, isTemplate);
             return prefab;
         }
 
@@ -1295,7 +1539,7 @@ namespace RetrowaveRocket
                 0.04f);
         }
 
-        private static void FinalizeRuntimePrefab(GameObject prefab, uint runtimeHash)
+        private static void FinalizeRuntimePrefab(GameObject prefab, uint runtimeHash, bool isTemplate)
         {
             if (prefab == null)
             {
@@ -1309,8 +1553,16 @@ namespace RetrowaveRocket
                 GlobalObjectIdHashField.SetValue(networkObject, runtimeHash);
             }
 
-            prefab.hideFlags = HideFlags.HideAndDontSave;
-            DontDestroyOnLoad(prefab);
+            if (isTemplate)
+            {
+                prefab.hideFlags = HideFlags.HideAndDontSave;
+                DontDestroyOnLoad(prefab);
+                prefab.SetActive(false);
+            }
+            else
+            {
+                prefab.SetActive(true);
+            }
         }
     }
 }

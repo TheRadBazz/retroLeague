@@ -72,6 +72,13 @@ namespace RetrowaveRocket
         {
             return team == RetrowaveTeam.Blue ? Quaternion.identity : Quaternion.Euler(0f, 180f, 0f);
         }
+
+        public static Vector3 GetSpectatorStagingPoint(ulong clientId)
+        {
+            var lane = (int)(clientId % 4ul);
+            var row = (int)(clientId / 4ul);
+            return new Vector3(-18f + lane * 12f, 42f + row * 4f, 0f);
+        }
     }
 
     public static class RetrowaveStyle

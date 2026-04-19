@@ -81,6 +81,16 @@ namespace RetrowaveRocket
             NetworkVariableReadPermission.Everyone,
             NetworkVariableWritePermission.Server);
 
+        private readonly NetworkVariable<int> _lobbyRoleValue = new(
+            (int)RetrowaveLobbyRole.Spectator,
+            NetworkVariableReadPermission.Everyone,
+            NetworkVariableWritePermission.Server);
+
+        private readonly NetworkVariable<bool> _hasSelectedRole = new(
+            false,
+            NetworkVariableReadPermission.Everyone,
+            NetworkVariableWritePermission.Server);
+
         private readonly NetworkVariable<float> _boostAmount = new(
             RetrowaveArenaConfig.StartingBoost,
             NetworkVariableReadPermission.Everyone,
@@ -97,6 +107,7 @@ namespace RetrowaveRocket
             NetworkVariableWritePermission.Server);
 
         private Rigidbody _rigidbody;
+        private Collider[] _colliders;
         private MeshRenderer[] _renderers;
         private Light _boostLight;
         private RetrowavePlayerInputState _latestInput;
@@ -115,8 +126,12 @@ namespace RetrowaveRocket
         private int _groundProbeCount;
 
         public static RetrowavePlayerController LocalOwner { get; private set; }
+        public static RetrowavePlayerController LocalPlayer { get; private set; }
 
         public RetrowaveTeam Team => (RetrowaveTeam)_teamValue.Value;
+        public RetrowaveLobbyRole LobbyRole => (RetrowaveLobbyRole)_lobbyRoleValue.Value;
+        public bool HasSelectedRole => _hasSelectedRole.Value;
+        public bool IsArenaParticipant => HasSelectedRole && LobbyRole != RetrowaveLobbyRole.Spectator;
         public float BoostNormalized => Mathf.Clamp01(_boostAmount.Value / RetrowaveArenaConfig.MaxBoost);
         public bool HasSpeedBoost => _speedBoostTimer.Value > 0.05f;
         public Rigidbody Body => _rigidbody;
@@ -125,6 +140,7 @@ namespace RetrowaveRocket
         private void Awake()
         {
             _rigidbody = GetComponent<Rigidbody>();
+            _colliders = GetComponentsInChildren<Collider>(true);
             _renderers = GetComponentsInChildren<MeshRenderer>(true);
             _boostLight = GetComponentInChildren<Light>(true);
 
@@ -156,6 +172,7 @@ namespace RetrowaveRocket
                 CacheLocalInput();
             }
 
+            RefreshPresentationState();
             UpdateBoostVisuals();
         }
 
@@ -163,6 +180,16 @@ namespace RetrowaveRocket
         {
             if (!IsSpawned)
             {
+                return;
+            }
+
+            if (!IsArenaParticipant)
+            {
+                if (IsServer)
+                {
+                    _boostFx.Value = false;
+                }
+
                 return;
             }
 
@@ -210,6 +237,8 @@ namespace RetrowaveRocket
         {
             base.OnNetworkSpawn();
             _teamValue.OnValueChanged += HandleTeamChanged;
+            _lobbyRoleValue.OnValueChanged += HandleLobbyRoleChanged;
+            _hasSelectedRole.OnValueChanged += HandleSelectedRoleChanged;
 
             if (!IsServer)
             {
@@ -218,22 +247,34 @@ namespace RetrowaveRocket
             }
 
             ApplyTeamVisuals(Team);
+            RefreshPresentationState();
 
             if (IsOwner)
             {
-                LocalOwner = this;
-                RetrowaveCameraRig.AttachTo(this);
+                LocalPlayer = this;
+            }
+
+            if (IsServer)
+            {
+                RetrowaveMatchManager.Instance?.HandlePlayerObjectSpawned(OwnerClientId);
             }
         }
 
         public override void OnNetworkDespawn()
         {
             _teamValue.OnValueChanged -= HandleTeamChanged;
+            _lobbyRoleValue.OnValueChanged -= HandleLobbyRoleChanged;
+            _hasSelectedRole.OnValueChanged -= HandleSelectedRoleChanged;
 
             if (LocalOwner == this)
             {
                 LocalOwner = null;
                 RetrowaveCameraRig.ShowOverview();
+            }
+
+            if (LocalPlayer == this)
+            {
+                LocalPlayer = null;
             }
 
             base.OnNetworkDespawn();
@@ -245,6 +286,13 @@ namespace RetrowaveRocket
             _latestInput = input;
         }
 
+        [ServerRpc]
+        private void SubmitRoleSelectionServerRpc(int roleValue)
+        {
+            var clampedRole = (RetrowaveLobbyRole)Mathf.Clamp(roleValue, (int)RetrowaveLobbyRole.Spectator, (int)RetrowaveLobbyRole.Orange);
+            RetrowaveMatchManager.Instance?.HandlePlayerRoleSelection(OwnerClientId, clampedRole);
+        }
+
         public void ConfigureServer(RetrowaveTeam team, int spawnIndex)
         {
             if (!IsServer)
@@ -252,7 +300,11 @@ namespace RetrowaveRocket
                 return;
             }
 
+            _lobbyRoleValue.Value = team == RetrowaveTeam.Blue ? (int)RetrowaveLobbyRole.Blue : (int)RetrowaveLobbyRole.Orange;
+            _hasSelectedRole.Value = true;
             _teamValue.Value = (int)team;
+            _rigidbody.isKinematic = false;
+            _rigidbody.useGravity = true;
             _spawnPosition = RetrowaveArenaConfig.GetSpawnPoint(team, spawnIndex);
             _spawnRotation = RetrowaveArenaConfig.GetSpawnRotation(team);
             ResetToSpawn();
@@ -274,6 +326,40 @@ namespace RetrowaveRocket
             _isGrounded = false;
             _groundProbeCount = 0;
             _coyoteTimer = 0f;
+        }
+
+        public void SetSpectatorStateServer(bool hasSelectedRole)
+        {
+            if (!IsServer)
+            {
+                return;
+            }
+
+            _lobbyRoleValue.Value = (int)RetrowaveLobbyRole.Spectator;
+            _hasSelectedRole.Value = hasSelectedRole;
+            _rigidbody.linearVelocity = Vector3.zero;
+            _rigidbody.angularVelocity = Vector3.zero;
+            _rigidbody.isKinematic = true;
+            _rigidbody.useGravity = false;
+            transform.SetPositionAndRotation(RetrowaveArenaConfig.GetSpectatorStagingPoint(OwnerClientId), Quaternion.identity);
+            _boostAmount.Value = RetrowaveArenaConfig.StartingBoost;
+            _speedBoostTimer.Value = 0f;
+            _groundNormal = Vector3.up;
+            _isGrounded = false;
+            _groundProbeCount = 0;
+            _coyoteTimer = 0f;
+            _latestInput = default;
+            _boostFx.Value = false;
+        }
+
+        public void RequestRoleSelection(RetrowaveLobbyRole role)
+        {
+            if (!IsOwner || !IsSpawned)
+            {
+                return;
+            }
+
+            SubmitRoleSelectionServerRpc((int)role);
         }
 
         public void ApplyPowerUp(RetrowavePowerUpType type)
@@ -298,11 +384,12 @@ namespace RetrowaveRocket
         public static void ClearLocalOwner()
         {
             LocalOwner = null;
+            LocalPlayer = null;
         }
 
         private void CacheLocalInput()
         {
-            if (RetrowaveGameBootstrap.IsGameplayInputBlocked())
+            if (RetrowaveGameBootstrap.IsGameplayInputBlocked() || !IsArenaParticipant)
             {
                 _cachedThrottle = 0f;
                 _cachedSteer = 0f;
@@ -587,6 +674,59 @@ namespace RetrowaveRocket
         private void HandleTeamChanged(int _, int nextValue)
         {
             ApplyTeamVisuals((RetrowaveTeam)nextValue);
+            RefreshPresentationState();
+        }
+
+        private void HandleLobbyRoleChanged(int _, int __)
+        {
+            RefreshPresentationState();
+        }
+
+        private void HandleSelectedRoleChanged(bool _, bool __)
+        {
+            RefreshPresentationState();
+        }
+
+        private void RefreshPresentationState()
+        {
+            var shouldShowVehicle = IsArenaParticipant;
+
+            foreach (var renderer in _renderers)
+            {
+                renderer.enabled = shouldShowVehicle;
+            }
+
+            foreach (var collider in _colliders)
+            {
+                collider.enabled = shouldShowVehicle;
+            }
+
+            if (_boostLight != null)
+            {
+                _boostLight.enabled = shouldShowVehicle;
+            }
+
+            if (!IsOwner)
+            {
+                return;
+            }
+
+            if (shouldShowVehicle)
+            {
+                if (LocalOwner != this)
+                {
+                    LocalOwner = this;
+                    RetrowaveCameraRig.AttachTo(this);
+                }
+
+                return;
+            }
+
+            if (LocalOwner == this)
+            {
+                LocalOwner = null;
+                RetrowaveCameraRig.ShowOverview();
+            }
         }
 
         private void ApplyTeamVisuals(RetrowaveTeam team)
