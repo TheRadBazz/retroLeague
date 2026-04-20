@@ -7,8 +7,14 @@ namespace RetrowaveRocket
     [RequireComponent(typeof(Camera))]
     public sealed class RetrowaveCameraRig : MonoBehaviour
     {
-        private static readonly Vector3 OverviewPosition = new Vector3(0f, 24f, -56f);
-        private static readonly Vector3 OverviewLookPoint = new Vector3(0f, 5f, 0f);
+        private const float BaseFieldOfView = 72f;
+        private enum FollowMode
+        {
+            Overview = 0,
+            ControlledPlayer = 1,
+            WarmupSpectator = 2,
+        }
+
         private const float DefaultOrbitPitch = 14f;
         private const float OrbitDistance = 9.5f;
         private const float OrbitHeight = 1.65f;
@@ -27,6 +33,7 @@ namespace RetrowaveRocket
 
         private Camera _camera;
         private RetrowavePlayerController _target;
+        private FollowMode _followMode;
         private Vector3 _velocity;
         private Vector3 _lastTargetPosition;
         private Vector3 _estimatedVelocity;
@@ -63,23 +70,78 @@ namespace RetrowaveRocket
         public static void AttachTo(RetrowavePlayerController target)
         {
             EnsureCamera();
-            _instance._target = target;
-            _instance._lastTargetPosition = target.transform.position;
-            _instance._estimatedVelocity = Vector3.zero;
-            _instance._orbitYaw = 0f;
-            _instance._orbitPitch = DefaultOrbitPitch;
-            _instance._currentOrbitDistance = OrbitDistance;
-            _instance._orbitDistanceVelocity = 0f;
+            _instance.AttachInternal(target, FollowMode.ControlledPlayer);
+        }
+
+        public static void AttachWarmupSpectatorTarget(RetrowavePlayerController target)
+        {
+            EnsureCamera();
+            _instance.AttachInternal(target, FollowMode.WarmupSpectator);
+        }
+
+        public static void CycleWarmupSpectatorTarget(int direction, System.Collections.Generic.IReadOnlyList<RetrowavePlayerController> candidates)
+        {
+            EnsureCamera();
+
+            if (candidates == null || candidates.Count == 0)
+            {
+                ShowOverview();
+                return;
+            }
+
+            var currentIndex = -1;
+
+            for (var i = 0; i < candidates.Count; i++)
+            {
+                if (candidates[i] == _instance._target)
+                {
+                    currentIndex = i;
+                    break;
+                }
+            }
+
+            var nextIndex = currentIndex < 0
+                ? 0
+                : (currentIndex + direction + candidates.Count) % candidates.Count;
+            _instance.AttachInternal(candidates[nextIndex], FollowMode.WarmupSpectator);
+        }
+
+        public static string GetSpectatorCameraLabel()
+        {
+            EnsureCamera();
+
+            if (_instance._followMode == FollowMode.WarmupSpectator && _instance._target != null)
+            {
+                return $"Camera: warmup follow on Player {_instance._target.OwnerClientId}";
+            }
+
+            return "Camera: spectator overview";
+        }
+
+        private void AttachInternal(RetrowavePlayerController target, FollowMode followMode)
+        {
+            _target = target;
+            _followMode = followMode;
+            _lastTargetPosition = target.transform.position;
+            _estimatedVelocity = Vector3.zero;
+            _orbitYaw = 0f;
+            _orbitPitch = DefaultOrbitPitch;
+            _currentOrbitDistance = OrbitDistance;
+            _orbitDistanceVelocity = 0f;
         }
 
         public static void ShowOverview()
         {
             EnsureCamera();
             _instance._target = null;
+            _instance._followMode = FollowMode.Overview;
             _instance._velocity = Vector3.zero;
             _instance._estimatedVelocity = Vector3.zero;
-            _instance.transform.position = OverviewPosition;
-            _instance.transform.rotation = Quaternion.LookRotation(OverviewLookPoint - OverviewPosition, Vector3.up);
+            _instance.ApplyViewSettings();
+            var overviewPosition = ResolveOverviewPosition();
+            var overviewLookPoint = ResolveOverviewLookPoint();
+            _instance.transform.position = overviewPosition;
+            _instance.transform.rotation = Quaternion.LookRotation(overviewLookPoint - overviewPosition, Vector3.up);
             _instance._currentOrbitDistance = OrbitDistance;
             _instance._orbitDistanceVelocity = 0f;
             _instance.UpdateCursorState(false);
@@ -91,16 +153,23 @@ namespace RetrowaveRocket
             _camera = GetComponent<Camera>();
             _camera.clearFlags = CameraClearFlags.SolidColor;
             _camera.backgroundColor = new Color(0.03f, 0.01f, 0.08f);
-            _camera.fieldOfView = 72f;
-            _camera.farClipPlane = 400f;
+            _camera.fieldOfView = BaseFieldOfView;
             ShowOverview();
         }
 
         private void LateUpdate()
         {
+            ApplyViewSettings();
+
             if (_target == null)
             {
                 UpdateCursorState(false);
+                return;
+            }
+
+            if (_followMode == FollowMode.WarmupSpectator && !_target.IsArenaParticipant)
+            {
+                ShowOverview();
                 return;
             }
 
@@ -145,7 +214,7 @@ namespace RetrowaveRocket
                 Quaternion.LookRotation(lookPoint - transform.position, blendedUp),
                 Time.deltaTime * 8f);
 
-            var targetFov = 72f + Mathf.Clamp(bodyVelocity.magnitude * 0.8f, 0f, 18f);
+            var targetFov = BaseFieldOfView + Mathf.Clamp(bodyVelocity.magnitude * 0.8f, 0f, 18f);
             _camera.fieldOfView = Mathf.Lerp(_camera.fieldOfView, targetFov, Time.deltaTime * 5f);
         }
 
@@ -208,6 +277,31 @@ namespace RetrowaveRocket
         {
             Cursor.lockState = shouldLock ? CursorLockMode.Locked : CursorLockMode.None;
             Cursor.visible = !shouldLock;
+        }
+
+        private void ApplyViewSettings()
+        {
+            if (_camera == null)
+            {
+                return;
+            }
+
+            var layout = RetrowaveArenaConfig.CurrentLayout;
+            _camera.farClipPlane = Mathf.Max(400f, layout.OuterHalfLength * 4.2f);
+        }
+
+        private static Vector3 ResolveOverviewPosition()
+        {
+            var layout = RetrowaveArenaConfig.CurrentLayout;
+            var overviewHeight = Mathf.Max(24f, layout.CeilingHeight * 0.7f);
+            var overviewDepth = -Mathf.Max(56f, layout.OuterHalfLength * 0.82f);
+            return new Vector3(0f, overviewHeight, overviewDepth);
+        }
+
+        private static Vector3 ResolveOverviewLookPoint()
+        {
+            var layout = RetrowaveArenaConfig.CurrentLayout;
+            return new Vector3(0f, Mathf.Max(5f, layout.CeilingHeight * 0.14f), 0f);
         }
     }
 }

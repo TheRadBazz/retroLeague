@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Reflection;
 using TMPro;
@@ -63,6 +64,7 @@ namespace RetrowaveRocket
         private static RetrowaveGameBootstrap _instance;
         private static readonly FieldInfo GlobalObjectIdHashField = typeof(NetworkObject).GetField("GlobalObjectIdHash", BindingFlags.Instance | BindingFlags.NonPublic);
 
+        private GameObject _networkRuntimeRoot;
         private NetworkManager _networkManager;
         private UnityTransport _transport;
         private GameObject _playerPrefab;
@@ -97,6 +99,7 @@ namespace RetrowaveRocket
         private TMP_Text _gameplayStartButtonLabel;
         private bool _gameplayMenuWasVisible;
         private float _serverSessionReconcileTimer;
+        private RetrowaveMatchSettings _currentMatchSettings = RetrowaveMatchSettings.Default;
 
         public static RetrowaveGameBootstrap Instance => _instance;
         public GameObject PlayerPrefab => _playerPrefab;
@@ -104,6 +107,8 @@ namespace RetrowaveRocket
         public GameObject PowerUpPrefab => _powerUpPrefab;
         public string DefaultAddress => _address;
         public string DefaultPort => _port.ToString();
+        public string SuggestedHostAddress => ResolvePreferredAddress();
+        public RetrowaveMatchSettings CurrentMatchSettings => _currentMatchSettings;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Install()
@@ -121,6 +126,11 @@ namespace RetrowaveRocket
         public static bool IsGameplayInputBlocked()
         {
             return _instance != null && _instance.ShouldBlockGameplayInput();
+        }
+
+        public static void RequestProcessShutdown()
+        {
+            _instance?.PrepareForProcessExit();
         }
 
         private void Awake()
@@ -166,6 +176,7 @@ namespace RetrowaveRocket
             if (keyboard != null)
             {
                 HandleRoleSelectionHotkeys(keyboard);
+                HandleSpectatorFollowHotkeys(keyboard);
                 _showScoreboard = keyboard.tabKey.isPressed;
 
                 if (keyboard.escapeKey.wasPressedThisFrame && !RequiresRoleSelection())
@@ -221,21 +232,48 @@ namespace RetrowaveRocket
             }
         }
 
+        private void HandleSpectatorFollowHotkeys(Keyboard keyboard)
+        {
+            if (!CanCycleWarmupSpectatorTargets())
+            {
+                return;
+            }
+
+            if (keyboard.leftBracketKey.wasPressedThisFrame || keyboard.commaKey.wasPressedThisFrame)
+            {
+                RetrowaveCameraRig.CycleWarmupSpectatorTarget(-1, GetWarmupSpectatorTargets());
+                return;
+            }
+
+            if (keyboard.rightBracketKey.wasPressedThisFrame || keyboard.periodKey.wasPressedThisFrame)
+            {
+                RetrowaveCameraRig.CycleWarmupSpectatorTarget(1, GetWarmupSpectatorTargets());
+            }
+        }
+
         private void OnDestroy()
         {
             if (_instance == this)
             {
-                if (_networkManager != null)
-                {
-                    _networkManager.OnServerStarted -= HandleServerStarted;
-                    _networkManager.OnClientConnectedCallback -= HandleNetworkClientConnected;
-                }
-
+                ForceShutdownSession(false, false);
                 SceneManager.sceneLoaded -= HandleSceneLoaded;
                 ClearGoalCelebrationState();
                 DestroyGameplayMenuOverlay();
                 _instance = null;
             }
+        }
+
+        private void OnDisable()
+        {
+            if (_instance == this)
+            {
+                ForceShutdownSession(false, false);
+            }
+        }
+
+        private void OnApplicationQuit()
+        {
+            PrepareForProcessExit();
         }
 
         private void OnGUI()
@@ -271,13 +309,17 @@ namespace RetrowaveRocket
             }
         }
 
-        public bool BeginHostFromMenu(string address, string portText, out string message)
+        public bool BeginHostFromMenu(string address, string portText, RetrowaveMatchSettings matchSettings, out string message)
         {
+            _currentMatchSettings = matchSettings;
+            RetrowaveArenaConfig.ApplyMatchSettings(matchSettings);
             return BeginConnectionFromMenu(PendingConnectionMode.Host, address, portText, out message);
         }
 
         public bool BeginClientFromMenu(string address, string portText, out string message)
         {
+            _currentMatchSettings = RetrowaveMatchSettings.Default;
+            RetrowaveArenaConfig.ApplyMatchSettings(_currentMatchSettings);
             return BeginConnectionFromMenu(PendingConnectionMode.Client, address, portText, out message);
         }
 
@@ -314,11 +356,11 @@ namespace RetrowaveRocket
                 return;
             }
 
-            var runtimeRoot = new GameObject("Retrowave Net Runtime");
-            DontDestroyOnLoad(runtimeRoot);
+            _networkRuntimeRoot = new GameObject("Retrowave Net Runtime");
+            DontDestroyOnLoad(_networkRuntimeRoot);
 
-            _networkManager = runtimeRoot.AddComponent<NetworkManager>();
-            _transport = runtimeRoot.AddComponent<UnityTransport>();
+            _networkManager = _networkRuntimeRoot.AddComponent<NetworkManager>();
+            _transport = _networkRuntimeRoot.AddComponent<UnityTransport>();
             _networkManager.NetworkConfig ??= new NetworkConfig();
             _networkManager.NetworkConfig.NetworkTransport = _transport;
             _networkManager.NetworkConfig.EnableSceneManagement = false;
@@ -368,7 +410,8 @@ namespace RetrowaveRocket
             }
 
             var trimmedAddress = string.IsNullOrWhiteSpace(address) ? string.Empty : address.Trim();
-            _address = string.IsNullOrWhiteSpace(trimmedAddress)
+            var shouldResolveHostAddress = mode == PendingConnectionMode.Host && IsLoopbackAddress(trimmedAddress);
+            _address = string.IsNullOrWhiteSpace(trimmedAddress) || shouldResolveHostAddress
                 ? ResolvePreferredAddress()
                 : trimmedAddress;
             _port = port;
@@ -546,6 +589,9 @@ namespace RetrowaveRocket
             {
                 var phaseLabel = matchManager.IsWarmup ? "Warmup / Practice" : "Live Match";
                 GUILayout.Label($"{phaseLabel}    Blue {matchManager.BlueScore} : {matchManager.OrangeScore} Orange");
+                GUILayout.Label(matchManager.IsWarmup
+                    ? $"Round timer preset: {FormatRoundDuration(matchManager.RoundDurationSeconds)}    Max players: {matchManager.MaxPlayers}"
+                    : $"Round {Mathf.Max(1, matchManager.CurrentRoundNumber)}    {FormatRoundClock(matchManager.RoundTimeRemaining)} remaining");
 
                 if (TryGetLocalLobbyEntry(out var entry))
                 {
@@ -554,6 +600,10 @@ namespace RetrowaveRocket
                     if (!entry.HasSelectedRole)
                     {
                         GUILayout.Label("Choose a team or spectate to enter the lobby.");
+                    }
+                    else if (entry.QueuedForNextRound)
+                    {
+                        GUILayout.Label("Team change queued. You will enter on the next round.");
                     }
                     else if (entry.IsHost && matchManager.IsWarmup)
                     {
@@ -591,7 +641,12 @@ namespace RetrowaveRocket
             }
             else
             {
-                GUILayout.Label("Camera: spectator overview");
+                GUILayout.Label(RetrowaveCameraRig.GetSpectatorCameraLabel());
+
+                if (CanCycleWarmupSpectatorTargets())
+                {
+                    GUILayout.Label("Warmup cam: [, ] or < > cycles player follow.");
+                }
             }
 
             GUILayout.EndArea();
@@ -748,11 +803,13 @@ namespace RetrowaveRocket
 
             var hostCanStart = false;
             var hostIsPresent = false;
+            var localEntry = default(RetrowaveLobbyEntry);
+            var hasLocalEntry = matchManager != null && TryGetLocalLobbyEntry(out localEntry);
 
-            if (matchManager != null && TryGetLocalLobbyEntry(out var entry))
+            if (hasLocalEntry)
             {
-                hostIsPresent = entry.IsHost;
-                hostCanStart = entry.IsHost && matchManager.CanStartMatch;
+                hostIsPresent = localEntry.IsHost;
+                hostCanStart = localEntry.IsHost && matchManager.CanStartMatch;
             }
 
             _gameplayStartButton.gameObject.SetActive(hostIsPresent);
@@ -777,13 +834,19 @@ namespace RetrowaveRocket
             {
                 _gameplayMenuFooterText.text = "Use the buttons above to enter the arena.";
             }
+            else if (hasLocalEntry && localEntry.QueuedForNextRound)
+            {
+                _gameplayMenuFooterText.text = "Your new team selection is queued for the next round.";
+            }
             else if (hostIsPresent && !hostCanStart && matchManager != null)
             {
                 _gameplayMenuFooterText.text = "Host start unlocks once at least one player is on blue and orange.";
             }
             else
             {
-                _gameplayMenuFooterText.text = "Team changes apply immediately for this client.";
+                _gameplayMenuFooterText.text = matchManager != null && matchManager.IsWarmup && CanCycleWarmupSpectatorTargets()
+                    ? "Warmup spectators can cycle player follow cams with [ and ]."
+                    : "Team changes apply immediately for this client.";
             }
 
             if (!wasVisible)
@@ -855,7 +918,7 @@ namespace RetrowaveRocket
             text.fontStyle = fontStyle;
             text.color = color;
             text.alignment = TextAlignmentOptions.Center;
-            text.enableWordWrapping = true;
+            text.textWrappingMode = TextWrappingModes.Normal;
             text.text = string.Empty;
             return text;
         }
@@ -1119,6 +1182,11 @@ namespace RetrowaveRocket
                     playerLabel += " [Host]";
                 }
 
+                if (entry.QueuedForNextRound)
+                {
+                    playerLabel += " [Next Round]";
+                }
+
                 GUILayout.BeginHorizontal();
                 GUILayout.Label(playerLabel, GUILayout.Width(220f));
                 GUILayout.Label(entry.Goals.ToString(), GUILayout.Width(70f));
@@ -1163,6 +1231,54 @@ namespace RetrowaveRocket
                    && (GetActiveMatchManager() == null || RetrowavePlayerController.LocalPlayer == null);
         }
 
+        private bool CanCycleWarmupSpectatorTargets()
+        {
+            var matchManager = GetActiveMatchManager();
+
+            if (matchManager == null || !matchManager.IsWarmup)
+            {
+                return false;
+            }
+
+            if (!TryGetLocalLobbyEntry(out var entry))
+            {
+                return false;
+            }
+
+            return entry.HasSelectedRole
+                   && entry.Role == RetrowaveLobbyRole.Spectator
+                   && RetrowavePlayerController.LocalOwner == null
+                   && GetWarmupSpectatorTargets().Count > 0;
+        }
+
+        private List<RetrowavePlayerController> GetWarmupSpectatorTargets()
+        {
+            var targets = new List<RetrowavePlayerController>();
+
+            if (_networkManager?.SpawnManager == null)
+            {
+                return targets;
+            }
+
+            foreach (var networkObject in _networkManager.SpawnManager.SpawnedObjectsList)
+            {
+                if (networkObject == null || !networkObject.TryGetComponent<RetrowavePlayerController>(out var player))
+                {
+                    continue;
+                }
+
+                if (!player.IsArenaParticipant)
+                {
+                    continue;
+                }
+
+                targets.Add(player);
+            }
+
+            targets.Sort(static (left, right) => left.OwnerClientId.CompareTo(right.OwnerClientId));
+            return targets;
+        }
+
         private bool RequiresRoleSelection()
         {
             if (RetrowavePlayerController.LocalPlayer != null)
@@ -1187,7 +1303,13 @@ namespace RetrowaveRocket
 
         private static string GetRoleLabel(RetrowaveLobbyEntry entry)
         {
-            return GetRoleLabel(entry.Role, entry.HasSelectedRole);
+            if (!entry.HasSelectedRole)
+            {
+                return "Unassigned";
+            }
+
+            var label = GetRoleLabel(entry.Role, true);
+            return entry.QueuedForNextRound ? $"{label} (next round)" : label;
         }
 
         private static string GetRoleLabel(RetrowaveLobbyRole role, bool hasSelectedRole)
@@ -1203,6 +1325,19 @@ namespace RetrowaveRocket
                 RetrowaveLobbyRole.Orange => "Orange Team",
                 _ => "Spectator",
             };
+        }
+
+        private static string FormatRoundDuration(int seconds)
+        {
+            var duration = TimeSpan.FromSeconds(Mathf.Max(0, seconds));
+            return duration.TotalMinutes >= 1d && duration.Seconds == 0
+                ? $"{duration.Minutes:0}m"
+                : duration.ToString(@"m\:ss");
+        }
+
+        private static string FormatRoundClock(float secondsRemaining)
+        {
+            return TimeSpan.FromSeconds(Mathf.Max(0f, secondsRemaining)).ToString(@"m\:ss");
         }
 
         private RetrowaveMatchManager GetActiveMatchManager()
@@ -1249,14 +1384,7 @@ namespace RetrowaveRocket
 
         private void ShutdownSession()
         {
-            if (_networkManager == null || !_networkManager.IsListening)
-            {
-                return;
-            }
-
-            _networkManager.Shutdown();
-            RetrowavePlayerController.ClearLocalOwner();
-            RetrowaveCameraRig.ShowOverview();
+            ForceShutdownSession(true, true);
         }
 
         private bool TryParsePort(string portText, out ushort port)
@@ -1288,19 +1416,26 @@ namespace RetrowaveRocket
             yield return null;
             ApplyScenePresentation(SceneManager.GetActiveScene());
 
+            var started = false;
+
             switch (_pendingConnectionMode)
             {
                 case PendingConnectionMode.Host:
                     _transport.SetConnectionData(GetJoinAddressForDisplay(), _port, "0.0.0.0");
-                    _networkManager.StartHost();
+                    started = _networkManager.StartHost();
                     break;
                 case PendingConnectionMode.Client:
                     _transport.SetConnectionData(_address, _port);
-                    _networkManager.StartClient();
+                    started = _networkManager.StartClient();
                     break;
             }
 
             _pendingConnectionMode = PendingConnectionMode.None;
+
+            if (!started)
+            {
+                ForceShutdownSession(true, false);
+            }
         }
 
         private void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
@@ -1320,6 +1455,40 @@ namespace RetrowaveRocket
         {
             try
             {
+                foreach (var networkInterface in NetworkInterface.GetAllNetworkInterfaces())
+                {
+                    if (networkInterface.OperationalStatus != OperationalStatus.Up
+                        || networkInterface.NetworkInterfaceType == NetworkInterfaceType.Loopback
+                        || networkInterface.NetworkInterfaceType == NetworkInterfaceType.Tunnel)
+                    {
+                        continue;
+                    }
+
+                    var properties = networkInterface.GetIPProperties();
+
+                    foreach (var unicastAddress in properties.UnicastAddresses)
+                    {
+                        var ip = unicastAddress.Address;
+
+                        if (ip.AddressFamily != AddressFamily.InterNetwork || IPAddress.IsLoopback(ip))
+                        {
+                            continue;
+                        }
+
+                        var address = ip.ToString();
+
+                        if (address.StartsWith("169.254."))
+                        {
+                            continue;
+                        }
+
+                        if (IsPrivateIpv4(address))
+                        {
+                            return address;
+                        }
+                    }
+                }
+
                 var hostEntry = Dns.GetHostEntry(Dns.GetHostName());
 
                 foreach (var ip in hostEntry.AddressList)
@@ -1336,7 +1505,25 @@ namespace RetrowaveRocket
                         continue;
                     }
 
-                    return address;
+                    if (IsPrivateIpv4(address))
+                    {
+                        return address;
+                    }
+                }
+
+                foreach (var ip in hostEntry.AddressList)
+                {
+                    if (ip.AddressFamily != AddressFamily.InterNetwork || IPAddress.IsLoopback(ip))
+                    {
+                        continue;
+                    }
+
+                    var address = ip.ToString();
+
+                    if (!address.StartsWith("169.254."))
+                    {
+                        return address;
+                    }
                 }
             }
             catch
@@ -1347,11 +1534,84 @@ namespace RetrowaveRocket
             return "127.0.0.1";
         }
 
+        private static bool IsPrivateIpv4(string address)
+        {
+            var octets = address.Split('.');
+
+            if (octets.Length != 4
+                || !byte.TryParse(octets[0], out var first)
+                || !byte.TryParse(octets[1], out var second))
+            {
+                return false;
+            }
+
+            return first == 10
+                   || (first == 172 && second >= 16 && second <= 31)
+                   || (first == 192 && second == 168);
+        }
+
         private static bool IsLoopbackAddress(string address)
         {
             return string.IsNullOrWhiteSpace(address)
                    || address == "127.0.0.1"
                    || address.Equals("localhost", System.StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void PrepareForProcessExit()
+        {
+            StopAllCoroutines();
+            ForceShutdownSession(false, false);
+        }
+
+        private void ForceShutdownSession(bool rebuildRuntime, bool stopCoroutines)
+        {
+            if (stopCoroutines)
+            {
+                StopAllCoroutines();
+            }
+
+            _pendingConnectionMode = PendingConnectionMode.None;
+            _showPauseMenu = false;
+            _showScoreboard = false;
+            ClearGoalCelebrationState();
+            TearDownNetworkRuntime();
+            RetrowavePlayerController.ClearLocalOwner();
+            RetrowaveCameraRig.ShowOverview();
+
+            if (rebuildRuntime)
+            {
+                EnsureNetworkRuntime();
+            }
+        }
+
+        private void TearDownNetworkRuntime()
+        {
+            if (_networkManager != null)
+            {
+                _networkManager.OnServerStarted -= HandleServerStarted;
+                _networkManager.OnClientConnectedCallback -= HandleNetworkClientConnected;
+
+                if (_networkManager.IsListening)
+                {
+                    _networkManager.Shutdown();
+                }
+            }
+
+            if (_networkRuntimeRoot != null)
+            {
+                if (Application.isPlaying)
+                {
+                    Destroy(_networkRuntimeRoot);
+                }
+                else
+                {
+                    DestroyImmediate(_networkRuntimeRoot);
+                }
+            }
+
+            _networkRuntimeRoot = null;
+            _networkManager = null;
+            _transport = null;
         }
 
         private void ApplyScenePresentation(Scene scene)

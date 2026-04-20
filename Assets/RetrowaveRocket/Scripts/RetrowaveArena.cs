@@ -22,19 +22,285 @@ namespace RetrowaveRocket
         SpeedBurst = 1,
     }
 
+    public enum RetrowaveArenaSizePreset
+    {
+        Auto = 0,
+        Compact = 1,
+        Standard = 2,
+        Expanded = 3,
+        Stadium = 4,
+        Mega = 5,
+    }
+
+    public readonly struct RetrowaveMatchSettings
+    {
+        public RetrowaveMatchSettings(int roundDurationSeconds, int maxPlayers, RetrowaveArenaSizePreset arenaSizePreset)
+        {
+            RoundDurationSeconds = Mathf.Clamp(roundDurationSeconds, 60, 900);
+            MaxPlayers = Mathf.Clamp(maxPlayers, 2, 40);
+            ArenaSizePreset = arenaSizePreset;
+        }
+
+        public int RoundDurationSeconds { get; }
+        public int MaxPlayers { get; }
+        public RetrowaveArenaSizePreset ArenaSizePreset { get; }
+
+        public static RetrowaveMatchSettings Default => new RetrowaveMatchSettings(300, 4, RetrowaveArenaSizePreset.Auto);
+    }
+
+    public readonly struct RetrowaveArenaLayout
+    {
+        private const float FixedGoalHalfWidth = 12f;
+        private const float FixedGoalDepth = 12f;
+        private const float FixedGoalHeight = 7.5f;
+        private const float FixedRampWidth = 18f;
+        private const float FixedRampDepth = 24f;
+        private const float FixedRampHeight = 14f;
+        private const float FixedCeilingHeight = 36f;
+
+        public RetrowaveArenaLayout(
+            float flatHalfWidth,
+            float flatHalfLength,
+            float goalHalfWidth,
+            float goalDepth,
+            float goalHeight,
+            float outerHalfWidth,
+            float outerHalfLength,
+            float rampHeight,
+            float ceilingHeight,
+            int spawnColumns,
+            float spawnLaneHalfWidth,
+            float spawnStartDepth,
+            float spawnRowSpacing,
+            float spectatorHeight,
+            float spectatorDepth,
+            Vector3[] powerUpPositions,
+            int signature)
+        {
+            FlatHalfWidth = flatHalfWidth;
+            FlatHalfLength = flatHalfLength;
+            GoalHalfWidth = goalHalfWidth;
+            GoalDepth = goalDepth;
+            GoalHeight = goalHeight;
+            OuterHalfWidth = outerHalfWidth;
+            OuterHalfLength = outerHalfLength;
+            RampWidth = outerHalfWidth - flatHalfWidth;
+            RampDepth = outerHalfLength - flatHalfLength;
+            RampHeight = rampHeight;
+            CeilingHeight = ceilingHeight;
+            SpawnColumns = Mathf.Max(2, spawnColumns);
+            SpawnLaneHalfWidth = spawnLaneHalfWidth;
+            SpawnStartDepth = spawnStartDepth;
+            SpawnRowSpacing = spawnRowSpacing;
+            SpectatorHeight = spectatorHeight;
+            SpectatorDepth = spectatorDepth;
+            PowerUpPositions = powerUpPositions ?? new Vector3[0];
+            Signature = signature;
+        }
+
+        public float FlatHalfWidth { get; }
+        public float FlatHalfLength { get; }
+        public float GoalHalfWidth { get; }
+        public float GoalDepth { get; }
+        public float GoalHeight { get; }
+        public float OuterHalfWidth { get; }
+        public float OuterHalfLength { get; }
+        public float RampWidth { get; }
+        public float RampDepth { get; }
+        public float RampHeight { get; }
+        public float CeilingHeight { get; }
+        public int SpawnColumns { get; }
+        public float SpawnLaneHalfWidth { get; }
+        public float SpawnStartDepth { get; }
+        public float SpawnRowSpacing { get; }
+        public float SpectatorHeight { get; }
+        public float SpectatorDepth { get; }
+        public Vector3[] PowerUpPositions { get; }
+        public int Signature { get; }
+
+        public Vector3 BallSpawnPoint => new Vector3(0f, 1.35f, 0f);
+
+        public static RetrowaveArenaLayout Resolve(RetrowaveMatchSettings settings)
+        {
+            var minimumPreset = RecommendPreset(settings.MaxPlayers);
+            var finalPreset = settings.ArenaSizePreset == RetrowaveArenaSizePreset.Auto
+                ? minimumPreset
+                : (RetrowaveArenaSizePreset)Mathf.Max((int)minimumPreset, (int)settings.ArenaSizePreset);
+            var teamCapacity = Mathf.Max(1, Mathf.CeilToInt(settings.MaxPlayers * 0.5f));
+            var spawnColumns = Mathf.Clamp(Mathf.CeilToInt(Mathf.Sqrt(teamCapacity)), 2, 6);
+            var powerUpCount = settings.MaxPlayers switch
+            {
+                <= 6 => 6,
+                <= 12 => 8,
+                <= 20 => 10,
+                <= 30 => 12,
+                _ => 14,
+            };
+
+            return finalPreset switch
+            {
+                RetrowaveArenaSizePreset.Compact => BuildLayout(
+                    settings,
+                    40f,
+                    60f,
+                    spawnColumns,
+                    powerUpCount,
+                    (int)RetrowaveArenaSizePreset.Compact),
+                RetrowaveArenaSizePreset.Standard => BuildLayout(
+                    settings,
+                    54f,
+                    80f,
+                    spawnColumns,
+                    powerUpCount,
+                    (int)RetrowaveArenaSizePreset.Standard),
+                RetrowaveArenaSizePreset.Expanded => BuildLayout(
+                    settings,
+                    72f,
+                    106f,
+                    spawnColumns,
+                    powerUpCount,
+                    (int)RetrowaveArenaSizePreset.Expanded),
+                RetrowaveArenaSizePreset.Stadium => BuildLayout(
+                    settings,
+                    92f,
+                    136f,
+                    spawnColumns,
+                    powerUpCount,
+                    (int)RetrowaveArenaSizePreset.Stadium),
+                _ => BuildLayout(
+                    settings,
+                    120f,
+                    176f,
+                    spawnColumns,
+                    powerUpCount,
+                    (int)RetrowaveArenaSizePreset.Mega),
+            };
+        }
+
+        public static RetrowaveArenaSizePreset RecommendPreset(int maxPlayers)
+        {
+            return maxPlayers switch
+            {
+                <= 4 => RetrowaveArenaSizePreset.Compact,
+                <= 10 => RetrowaveArenaSizePreset.Standard,
+                <= 18 => RetrowaveArenaSizePreset.Expanded,
+                <= 28 => RetrowaveArenaSizePreset.Stadium,
+                _ => RetrowaveArenaSizePreset.Mega,
+            };
+        }
+
+        private static RetrowaveArenaLayout BuildLayout(
+            RetrowaveMatchSettings settings,
+            float flatHalfWidth,
+            float flatHalfLength,
+            int spawnColumns,
+            int powerUpCount,
+            int signatureSeed)
+        {
+            var outerHalfWidth = flatHalfWidth + FixedRampWidth;
+            var outerHalfLength = flatHalfLength + FixedRampDepth;
+            var spawnLaneHalfWidth = flatHalfWidth * 0.68f;
+            var spawnStartDepth = flatHalfLength * 0.58f;
+            var spawnRowSpacing = Mathf.Clamp(outerHalfLength * 0.12f, 8f, 18f);
+            var spectatorHeight = FixedCeilingHeight + 8f;
+            var spectatorDepth = -flatHalfLength * 0.12f;
+            var powerUps = BuildPowerUpPositions(flatHalfWidth, flatHalfLength, powerUpCount);
+            var signature = (signatureSeed * 1000) + (settings.MaxPlayers * 10) + powerUpCount;
+
+            return new RetrowaveArenaLayout(
+                flatHalfWidth,
+                flatHalfLength,
+                FixedGoalHalfWidth,
+                FixedGoalDepth,
+                FixedGoalHeight,
+                outerHalfWidth,
+                outerHalfLength,
+                FixedRampHeight,
+                FixedCeilingHeight,
+                spawnColumns,
+                spawnLaneHalfWidth,
+                spawnStartDepth,
+                spawnRowSpacing,
+                spectatorHeight,
+                spectatorDepth,
+                powerUps,
+                signature);
+        }
+
+        private static Vector3[] BuildPowerUpPositions(float flatHalfWidth, float flatHalfLength, int powerUpCount)
+        {
+            var positions = new System.Collections.Generic.List<Vector3>();
+            var sideX = flatHalfWidth * 0.62f;
+            var midZ = flatHalfLength * 0.32f;
+            var deepZ = flatHalfLength * 0.64f;
+            positions.AddRange(new[]
+            {
+                new Vector3(-sideX, 1.2f, -midZ),
+                new Vector3(sideX, 1.2f, -midZ),
+                new Vector3(-sideX, 1.2f, midZ),
+                new Vector3(sideX, 1.2f, midZ),
+                new Vector3(0f, 1.2f, -deepZ),
+                new Vector3(0f, 1.2f, deepZ),
+            });
+
+            if (powerUpCount <= 6)
+            {
+                return positions.ToArray();
+            }
+
+            var wideX = flatHalfWidth * 0.34f;
+            var wideZ = flatHalfLength * 0.8f;
+            positions.AddRange(new[]
+            {
+                new Vector3(-wideX, 1.2f, wideZ),
+                new Vector3(wideX, 1.2f, -wideZ),
+            });
+
+            if (powerUpCount <= 8)
+            {
+                return positions.ToArray();
+            }
+
+            var centerWideX = flatHalfWidth * 0.76f;
+            var centerWideZ = flatHalfLength * 0.18f;
+            positions.AddRange(new[]
+            {
+                new Vector3(-centerWideX, 1.2f, -centerWideZ),
+                new Vector3(centerWideX, 1.2f, centerWideZ),
+            });
+
+            if (powerUpCount <= 10)
+            {
+                return positions.ToArray();
+            }
+
+            var ringX = flatHalfWidth * 0.22f;
+            var ringZ = flatHalfLength * 0.92f;
+            positions.AddRange(new[]
+            {
+                new Vector3(-ringX, 1.2f, ringZ),
+                new Vector3(ringX, 1.2f, -ringZ),
+            });
+
+            if (powerUpCount <= 12)
+            {
+                return positions.ToArray();
+            }
+
+            var outerX = flatHalfWidth * 0.84f;
+            var outerZ = flatHalfLength * 0.48f;
+            positions.AddRange(new[]
+            {
+                new Vector3(-outerX, 1.2f, outerZ),
+                new Vector3(outerX, 1.2f, -outerZ),
+            });
+
+            return positions.ToArray();
+        }
+    }
+
     public static class RetrowaveArenaConfig
     {
-        public const float FlatHalfWidth = 38f;
-        public const float FlatHalfLength = 58f;
-        public const float GoalHalfWidth = 10f;
-        public const float GoalDepth = 10f;
-        public const float GoalHeight = 7f;
-        public const float OuterHalfWidth = 52f;
-        public const float OuterHalfLength = 74f;
-        public const float RampWidth = OuterHalfWidth - FlatHalfWidth;
-        public const float RampDepth = OuterHalfLength - FlatHalfLength;
-        public const float RampHeight = 12f;
-        public const float CeilingHeight = 34f;
         public const float MaxBoost = 100f;
         public const float StartingBoost = 55f;
         public const float PowerUpRespawnSeconds = 8f;
@@ -42,29 +308,41 @@ namespace RetrowaveRocket
         public const float SpeedBurstDuration = 4.5f;
         public const float PassiveBoostRegen = 6f;
 
-        public static readonly Vector3 BallSpawnPoint = new Vector3(0f, 1.35f, 0f);
+        private static RetrowaveMatchSettings _currentSettings = RetrowaveMatchSettings.Default;
+        private static RetrowaveArenaLayout _currentLayout = RetrowaveArenaLayout.Resolve(RetrowaveMatchSettings.Default);
 
-        public static readonly Vector3[] PowerUpPositions =
+        public static float FlatHalfWidth => _currentLayout.FlatHalfWidth;
+        public static float FlatHalfLength => _currentLayout.FlatHalfLength;
+        public static float GoalHalfWidth => _currentLayout.GoalHalfWidth;
+        public static float GoalDepth => _currentLayout.GoalDepth;
+        public static float GoalHeight => _currentLayout.GoalHeight;
+        public static float OuterHalfWidth => _currentLayout.OuterHalfWidth;
+        public static float OuterHalfLength => _currentLayout.OuterHalfLength;
+        public static float RampWidth => _currentLayout.RampWidth;
+        public static float RampDepth => _currentLayout.RampDepth;
+        public static float RampHeight => _currentLayout.RampHeight;
+        public static float CeilingHeight => _currentLayout.CeilingHeight;
+        public static Vector3 BallSpawnPoint => _currentLayout.BallSpawnPoint;
+        public static Vector3[] PowerUpPositions => _currentLayout.PowerUpPositions;
+        public static RetrowaveMatchSettings CurrentSettings => _currentSettings;
+        public static RetrowaveArenaLayout CurrentLayout => _currentLayout;
+
+        public static void ApplyMatchSettings(RetrowaveMatchSettings settings)
         {
-            new Vector3(-24f, 1.2f, -18f),
-            new Vector3(24f, 1.2f, -18f),
-            new Vector3(-24f, 1.2f, 18f),
-            new Vector3(24f, 1.2f, 18f),
-            new Vector3(0f, 1.2f, -38f),
-            new Vector3(0f, 1.2f, 38f),
-        };
+            _currentSettings = settings;
+            _currentLayout = RetrowaveArenaLayout.Resolve(settings);
+        }
 
         public static Vector3 GetSpawnPoint(RetrowaveTeam team, int slot)
         {
-            var row = slot / 3;
-            var column = slot % 3;
-            var lateral = column switch
-            {
-                0 => -14f,
-                1 => 14f,
-                _ => 0f,
-            };
-            var depth = team == RetrowaveTeam.Blue ? -34f - row * 8f : 34f + row * 8f;
+            var columns = Mathf.Max(2, _currentLayout.SpawnColumns);
+            var row = slot / columns;
+            var column = slot % columns;
+            var columnProgress = columns <= 1 ? 0.5f : column / (float)(columns - 1);
+            var lateral = Mathf.Lerp(-_currentLayout.SpawnLaneHalfWidth, _currentLayout.SpawnLaneHalfWidth, columnProgress);
+            var depth = team == RetrowaveTeam.Blue
+                ? -_currentLayout.SpawnStartDepth - row * _currentLayout.SpawnRowSpacing
+                : _currentLayout.SpawnStartDepth + row * _currentLayout.SpawnRowSpacing;
             return new Vector3(lateral, 1.35f, depth);
         }
 
@@ -77,7 +355,11 @@ namespace RetrowaveRocket
         {
             var lane = (int)(clientId % 4ul);
             var row = (int)(clientId / 4ul);
-            return new Vector3(-18f + lane * 12f, 42f + row * 4f, 0f);
+            var laneWidth = Mathf.Max(10f, _currentLayout.FlatHalfWidth * 0.3f);
+            return new Vector3(
+                -laneWidth * 1.5f + lane * laneWidth,
+                _currentLayout.SpectatorHeight + row * 4f,
+                _currentLayout.SpectatorDepth);
         }
     }
 
@@ -229,16 +511,25 @@ namespace RetrowaveRocket
     public static class RetrowaveArenaBuilder
     {
         private static GameObject _arenaRoot;
+        private static int _builtLayoutSignature = int.MinValue;
 
         public static void EnsureBuilt()
         {
-            if (_arenaRoot != null)
+            var requiredSignature = RetrowaveArenaConfig.CurrentLayout.Signature;
+
+            if (_arenaRoot != null && _builtLayoutSignature == requiredSignature)
             {
                 return;
             }
 
+            if (_arenaRoot != null)
+            {
+                Object.Destroy(_arenaRoot);
+            }
+
             _arenaRoot = new GameObject("Retrowave Arena");
             Object.DontDestroyOnLoad(_arenaRoot);
+            _builtLayoutSignature = requiredSignature;
 
             BuildArenaSurface(_arenaRoot.transform);
             BuildGoals(_arenaRoot.transform);
@@ -534,6 +825,9 @@ namespace RetrowaveRocket
             var skyline = new GameObject("Backdrop Skyline");
             skyline.transform.SetParent(parent, false);
             var backdropZ = -RetrowaveArenaConfig.OuterHalfLength - 34f;
+            var skylineWidth = Mathf.Max(110f, RetrowaveArenaConfig.OuterHalfWidth * 1.6f);
+            var skylineStartX = -skylineWidth * 0.5f;
+            var skylineSpacing = skylineWidth / 23f;
 
             for (var i = 0; i < 24; i++)
             {
@@ -541,7 +835,7 @@ namespace RetrowaveRocket
                 block.name = $"Skyline Block {i}";
                 block.transform.SetParent(skyline.transform, false);
 
-                var x = -55f + i * 4.6f;
+                var x = skylineStartX + i * skylineSpacing;
                 var height = 6f + Mathf.PingPong(i * 3.1f, 12f);
                 block.transform.position = new Vector3(x, height * 0.5f - 0.5f, backdropZ);
                 block.transform.localScale = new Vector3(3.2f, height, 3.2f);
@@ -560,29 +854,14 @@ namespace RetrowaveRocket
             sun.transform.localScale = new Vector3(22f, 22f, 3f);
             sun.GetComponent<MeshRenderer>().sharedMaterial = RetrowaveStyle.CreateUnlitMaterial(new Color(1f, 0.42f, 0.16f, 1f));
             DisableCollider(sun);
-
-            var sky = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            sky.name = "Sky Dome";
-            sky.transform.SetParent(parent, false);
-            sky.transform.position = Vector3.zero;
-            sky.transform.localScale = Vector3.one * 320f;
-            sky.GetComponent<SphereCollider>().enabled = false;
-
-            var skyMaterial = RetrowaveStyle.CreateLitMaterial(
-                new Color(0.03f, 0.01f, 0.08f),
-                new Color(0.01f, 0.02f, 0.06f),
-                1f,
-                0f);
-            skyMaterial.SetInt("_Cull", (int)UnityEngine.Rendering.CullMode.Front);
-            sky.GetComponent<MeshRenderer>().sharedMaterial = skyMaterial;
-            DisableCollider(sky);
         }
 
         private static void ConfigureLighting()
         {
+            var visibilityScale = Mathf.InverseLerp(84f, 200f, RetrowaveArenaConfig.OuterHalfLength);
             RenderSettings.fog = true;
             RenderSettings.fogColor = new Color(0.05f, 0.02f, 0.08f);
-            RenderSettings.fogDensity = 0.012f;
+            RenderSettings.fogDensity = Mathf.Lerp(0.012f, 0.0052f, visibilityScale);
             RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
             RenderSettings.ambientLight = new Color(0.17f, 0.09f, 0.22f);
             RenderSettings.reflectionIntensity = 0.45f;

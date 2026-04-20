@@ -17,20 +17,25 @@ namespace RetrowaveRocket
         public ulong ClientId;
         public FixedString32Bytes DisplayName;
         public int RoleValue;
+        public int ActiveRoleValue;
         public bool HasSelectedRole;
+        public bool QueuedForNextRound;
         public bool IsHost;
         public int Goals;
         public int Assists;
         public int PingMs;
 
         public RetrowaveLobbyRole Role => (RetrowaveLobbyRole)RoleValue;
+        public RetrowaveLobbyRole ActiveRole => (RetrowaveLobbyRole)ActiveRoleValue;
 
         public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
         {
             serializer.SerializeValue(ref ClientId);
             serializer.SerializeValue(ref DisplayName);
             serializer.SerializeValue(ref RoleValue);
+            serializer.SerializeValue(ref ActiveRoleValue);
             serializer.SerializeValue(ref HasSelectedRole);
+            serializer.SerializeValue(ref QueuedForNextRound);
             serializer.SerializeValue(ref IsHost);
             serializer.SerializeValue(ref Goals);
             serializer.SerializeValue(ref Assists);
@@ -42,7 +47,9 @@ namespace RetrowaveRocket
             return ClientId == other.ClientId
                    && DisplayName.Equals(other.DisplayName)
                    && RoleValue == other.RoleValue
+                   && ActiveRoleValue == other.ActiveRoleValue
                    && HasSelectedRole == other.HasSelectedRole
+                   && QueuedForNextRound == other.QueuedForNextRound
                    && IsHost == other.IsHost
                    && Goals == other.Goals
                    && Assists == other.Assists
@@ -78,6 +85,31 @@ namespace RetrowaveRocket
             NetworkVariableReadPermission.Everyone,
             NetworkVariableWritePermission.Server);
 
+        private readonly NetworkVariable<int> _roundDurationSeconds = new(
+            RetrowaveMatchSettings.Default.RoundDurationSeconds,
+            NetworkVariableReadPermission.Everyone,
+            NetworkVariableWritePermission.Server);
+
+        private readonly NetworkVariable<int> _maxPlayers = new(
+            RetrowaveMatchSettings.Default.MaxPlayers,
+            NetworkVariableReadPermission.Everyone,
+            NetworkVariableWritePermission.Server);
+
+        private readonly NetworkVariable<int> _arenaSizePresetValue = new(
+            (int)RetrowaveMatchSettings.Default.ArenaSizePreset,
+            NetworkVariableReadPermission.Everyone,
+            NetworkVariableWritePermission.Server);
+
+        private readonly NetworkVariable<int> _roundNumber = new(
+            0,
+            NetworkVariableReadPermission.Everyone,
+            NetworkVariableWritePermission.Server);
+
+        private readonly NetworkVariable<float> _roundTimeRemaining = new(
+            0f,
+            NetworkVariableReadPermission.Everyone,
+            NetworkVariableWritePermission.Server);
+
         private readonly NetworkList<RetrowaveLobbyEntry> _lobbyEntries = new();
         private bool _worldSpawned;
         private bool _resetQueued;
@@ -99,7 +131,12 @@ namespace RetrowaveRocket
         public bool IsLiveMatch => Phase == RetrowaveMatchPhase.Live;
         public bool IsGoalCelebrationActive => _goalCelebrationActive.Value;
         public NetworkList<RetrowaveLobbyEntry> LobbyEntries => _lobbyEntries;
-        public bool CanStartMatch => GetTeamCount(RetrowaveTeam.Blue) > 0 && GetTeamCount(RetrowaveTeam.Orange) > 0;
+        public int RoundDurationSeconds => _roundDurationSeconds.Value;
+        public int MaxPlayers => _maxPlayers.Value;
+        public RetrowaveArenaSizePreset ArenaSizePreset => (RetrowaveArenaSizePreset)_arenaSizePresetValue.Value;
+        public int CurrentRoundNumber => _roundNumber.Value;
+        public float RoundTimeRemaining => _roundTimeRemaining.Value;
+        public bool CanStartMatch => GetDesiredTeamCount(RetrowaveTeam.Blue) > 0 && GetDesiredTeamCount(RetrowaveTeam.Orange) > 0;
 
         public override void OnDestroy()
         {
@@ -131,6 +168,16 @@ namespace RetrowaveRocket
                     FinishGoalCelebration();
                 }
             }
+
+            if (IsLiveMatch && !_goalCelebrationActive.Value)
+            {
+                _roundTimeRemaining.Value = Mathf.Max(0f, _roundTimeRemaining.Value - Time.deltaTime);
+
+                if (_roundTimeRemaining.Value <= 0f)
+                {
+                    AdvanceToNextRound();
+                }
+            }
         }
 
         private void FixedUpdate()
@@ -148,11 +195,21 @@ namespace RetrowaveRocket
         {
             base.OnNetworkSpawn();
             Instance = this;
+            _roundDurationSeconds.OnValueChanged += HandleArenaSettingsChanged;
+            _maxPlayers.OnValueChanged += HandleArenaSettingsChanged;
+            _arenaSizePresetValue.OnValueChanged += HandleArenaSettingsChanged;
+
+            ApplyArenaSettingsLocally();
 
             if (!IsServer)
             {
                 return;
             }
+
+            var hostSettings = RetrowaveGameBootstrap.Instance != null
+                ? RetrowaveGameBootstrap.Instance.CurrentMatchSettings
+                : RetrowaveMatchSettings.Default;
+            ApplyHostSettings(hostSettings);
 
             NetworkManager.Singleton.OnClientConnectedCallback += HandleClientConnected;
             NetworkManager.Singleton.OnClientDisconnectCallback += HandleClientDisconnected;
@@ -170,6 +227,10 @@ namespace RetrowaveRocket
 
         public override void OnNetworkDespawn()
         {
+            _roundDurationSeconds.OnValueChanged -= HandleArenaSettingsChanged;
+            _maxPlayers.OnValueChanged -= HandleArenaSettingsChanged;
+            _arenaSizePresetValue.OnValueChanged -= HandleArenaSettingsChanged;
+
             if (IsServer && NetworkManager.Singleton != null)
             {
                 NetworkManager.Singleton.OnClientConnectedCallback -= HandleClientConnected;
@@ -182,6 +243,11 @@ namespace RetrowaveRocket
             }
 
             base.OnNetworkDespawn();
+        }
+
+        private void HandleArenaSettingsChanged(int _, int __)
+        {
+            ApplyArenaSettingsLocally();
         }
 
         public void HandleGoal(RetrowaveTeam defendedGoal)
@@ -287,8 +353,36 @@ namespace RetrowaveRocket
             }
 
             var entry = _lobbyEntries[index];
-            entry.RoleValue = (int)role;
+            var requestedRole = NormalizeRole(role);
+
+            if (requestedRole != RetrowaveLobbyRole.Spectator && !CanAssignDesiredTeam(clientId, entry, requestedRole))
+            {
+                return;
+            }
+
+            entry.RoleValue = (int)requestedRole;
             entry.HasSelectedRole = true;
+
+            if (requestedRole == RetrowaveLobbyRole.Spectator)
+            {
+                entry.ActiveRoleValue = (int)RetrowaveLobbyRole.Spectator;
+                entry.QueuedForNextRound = false;
+            }
+            else if (IsLiveMatch)
+            {
+                entry.QueuedForNextRound = entry.ActiveRole != requestedRole;
+
+                if (!IsTeamRole(entry.ActiveRole))
+                {
+                    entry.ActiveRoleValue = (int)RetrowaveLobbyRole.Spectator;
+                }
+            }
+            else
+            {
+                entry.ActiveRoleValue = (int)requestedRole;
+                entry.QueuedForNextRound = false;
+            }
+
             _lobbyEntries[index] = entry;
             RecalculateSpawnSlots();
         }
@@ -307,19 +401,63 @@ namespace RetrowaveRocket
             return false;
         }
 
-        public int GetTeamCount(RetrowaveTeam team)
+        public int GetDesiredTeamCount(RetrowaveTeam team)
+        {
+            return CountTeams(team, useActiveRole: false);
+        }
+
+        public int GetActiveTeamCount(RetrowaveTeam team)
+        {
+            return CountTeams(team, useActiveRole: true);
+        }
+
+        private int CountTeams(RetrowaveTeam team, bool useActiveRole)
         {
             var count = 0;
 
             for (var i = 0; i < _lobbyEntries.Count; i++)
             {
-                if (TryGetAssignedTeam(_lobbyEntries[i], out var assignedTeam) && assignedTeam == team)
+                if (TryGetAssignedTeam(_lobbyEntries[i], useActiveRole, out var assignedTeam) && assignedTeam == team)
                 {
                     count++;
                 }
             }
 
             return count;
+        }
+
+        private bool CanAssignDesiredTeam(ulong clientId, RetrowaveLobbyEntry currentEntry, RetrowaveLobbyRole requestedRole)
+        {
+            var requestedCount = 0;
+
+            for (var i = 0; i < _lobbyEntries.Count; i++)
+            {
+                var entry = _lobbyEntries[i];
+
+                if (entry.ClientId == clientId)
+                {
+                    entry = currentEntry;
+                    entry.RoleValue = (int)requestedRole;
+                    entry.HasSelectedRole = true;
+                }
+
+                if (TryGetAssignedTeam(entry, useActiveRole: false, out _))
+                {
+                    requestedCount++;
+                }
+            }
+
+            return requestedCount <= MaxPlayers;
+        }
+
+        private static RetrowaveLobbyRole NormalizeRole(RetrowaveLobbyRole role)
+        {
+            return (RetrowaveLobbyRole)Mathf.Clamp((int)role, (int)RetrowaveLobbyRole.Spectator, (int)RetrowaveLobbyRole.Orange);
+        }
+
+        private static bool IsTeamRole(RetrowaveLobbyRole role)
+        {
+            return role == RetrowaveLobbyRole.Blue || role == RetrowaveLobbyRole.Orange;
         }
 
         [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
@@ -367,7 +505,9 @@ namespace RetrowaveRocket
                 ClientId = clientId,
                 DisplayName = new FixedString32Bytes(label),
                 RoleValue = (int)RetrowaveLobbyRole.Spectator,
+                ActiveRoleValue = (int)RetrowaveLobbyRole.Spectator,
                 HasSelectedRole = false,
+                QueuedForNextRound = false,
                 IsHost = clientId == NetworkManager.ServerClientId,
                 Goals = 0,
                 Assists = 0,
@@ -409,17 +549,57 @@ namespace RetrowaveRocket
             _phaseValue.Value = (int)RetrowaveMatchPhase.Live;
             _blueScore.Value = 0;
             _orangeScore.Value = 0;
+            _roundNumber.Value = 1;
+            _roundTimeRemaining.Value = RoundDurationSeconds;
 
             for (var i = 0; i < _lobbyEntries.Count; i++)
             {
                 var entry = _lobbyEntries[i];
                 entry.Goals = 0;
                 entry.Assists = 0;
+                entry.ActiveRoleValue = entry.HasSelectedRole ? entry.RoleValue : (int)RetrowaveLobbyRole.Spectator;
+                entry.QueuedForNextRound = false;
                 _lobbyEntries[i] = entry;
             }
 
             _resetQueued = true;
             ClearTouchHistory();
+        }
+
+        private void AdvanceToNextRound()
+        {
+            CancelGoalCelebration();
+            _roundNumber.Value = Mathf.Max(1, _roundNumber.Value + 1);
+            _roundTimeRemaining.Value = RoundDurationSeconds;
+
+            for (var i = 0; i < _lobbyEntries.Count; i++)
+            {
+                var entry = _lobbyEntries[i];
+                entry.ActiveRoleValue = entry.HasSelectedRole ? entry.RoleValue : (int)RetrowaveLobbyRole.Spectator;
+                entry.QueuedForNextRound = false;
+                _lobbyEntries[i] = entry;
+            }
+
+            ResetRound();
+        }
+
+        private void ApplyHostSettings(RetrowaveMatchSettings settings)
+        {
+            _roundDurationSeconds.Value = settings.RoundDurationSeconds;
+            _maxPlayers.Value = settings.MaxPlayers;
+            _arenaSizePresetValue.Value = (int)settings.ArenaSizePreset;
+            ApplyArenaSettingsLocally();
+        }
+
+        private void ApplyArenaSettingsLocally()
+        {
+            var settings = new RetrowaveMatchSettings(
+                _roundDurationSeconds.Value,
+                _maxPlayers.Value,
+                (RetrowaveArenaSizePreset)_arenaSizePresetValue.Value);
+
+            RetrowaveArenaConfig.ApplyMatchSettings(settings);
+            RetrowaveArenaBuilder.EnsureBuilt();
         }
 
         private void SpawnWorldActors()
@@ -514,7 +694,7 @@ namespace RetrowaveRocket
                     continue;
                 }
 
-                if (TryGetAssignedTeam(clientId, out var team))
+                if (TryGetAssignedTeam(clientId, useActiveRole: true, out var team))
                 {
                     var spawnIndex = team == RetrowaveTeam.Blue ? blueSlot++ : orangeSlot++;
                     player.ConfigureServer(team, spawnIndex);
@@ -675,7 +855,7 @@ namespace RetrowaveRocket
             _previousTouchTime = 0d;
         }
 
-        private bool TryGetAssignedTeam(ulong clientId, out RetrowaveTeam team)
+        private bool TryGetAssignedTeam(ulong clientId, bool useActiveRole, out RetrowaveTeam team)
         {
             if (!TryGetLobbyEntry(clientId, out var entry))
             {
@@ -683,12 +863,14 @@ namespace RetrowaveRocket
                 return false;
             }
 
-            return TryGetAssignedTeam(entry, out team);
+            return TryGetAssignedTeam(entry, useActiveRole, out team);
         }
 
-        private static bool TryGetAssignedTeam(RetrowaveLobbyEntry entry, out RetrowaveTeam team)
+        private static bool TryGetAssignedTeam(RetrowaveLobbyEntry entry, bool useActiveRole, out RetrowaveTeam team)
         {
-            switch (entry.Role)
+            var role = useActiveRole ? entry.ActiveRole : entry.Role;
+
+            switch (role)
             {
                 case RetrowaveLobbyRole.Blue:
                     team = RetrowaveTeam.Blue;

@@ -254,6 +254,7 @@ namespace SlimUI.ModernMenu{
 		}
 
 		public void QuitGame(){
+			RetrowaveRocket.RetrowaveGameBootstrap.RequestProcessShutdown();
 			#if UNITY_EDITOR
 				UnityEditor.EditorApplication.isPlaying = false;
 			#else
