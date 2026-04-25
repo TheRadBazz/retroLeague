@@ -54,24 +54,30 @@ namespace RetrowaveRocket
         private const float ProbeCastStart = 0.38f;
         private const float ProbeRayLength = 1.4f;
         private const float RideHeight = 0.92f;
-        private const float SuspensionSpring = 92f;
-        private const float SuspensionDamping = 11f;
-        private const float GroundDriveAcceleration = 54f;
-        private const float GroundReverseAcceleration = 36f;
-        private const float GroundGrip = 20f;
-        private const float GroundSteeringTorque = 13f;
-        private const float GroundAlignTorque = 32f;
-        private const float GroundAngularDamping = 3.4f;
-        private const float GroundDrag = 1.9f;
-        private const float GroundStickForce = 9f;
-        private const float JumpImpulse = 8.8f;
-        private const float AirPitchTorque = 10f;
-        private const float AirYawTorque = 9f;
-        private const float AirRollTorque = 11f;
-        private const float AirForwardThrust = 11f;
-        private const float AirStrafeThrust = 8.5f;
-        private const float AirHoverBurst = 2.2f;
-        private const float AirBrakeDamping = 0.85f;
+        private const float SuspensionSpring = 104f;
+        private const float SuspensionDamping = 14.5f;
+        private const float GroundDriveAcceleration = 58f;
+        private const float GroundReverseAcceleration = 39f;
+        private const float GroundGrip = 24f;
+        private const float GroundSteeringTorque = 14.5f;
+        private const float GroundAlignTorque = 36f;
+        private const float GroundAngularDamping = 4.6f;
+        private const float GroundDrag = 1.45f;
+        private const float GroundStickForce = 13f;
+        private const float JumpImpulse = 9.35f;
+        private const float AirPitchTorque = 12.5f;
+        private const float AirYawTorque = 11f;
+        private const float AirRollTorque = 13.5f;
+        private const float AirForwardThrust = 14f;
+        private const float AirStrafeThrust = 10.5f;
+        private const float AirHoverBurst = 3.4f;
+        private const float AirBrakeDamping = 1.05f;
+        private const float AirAngularDamping = 2.8f;
+        private const float AirAutoLevelTorque = 6.5f;
+        private const float AirYawStabilizeTorque = 2.6f;
+        private const float AirLateralDamping = 0.55f;
+        private const float AirGravityAssist = 4.5f;
+        private const float GroundVelocityTurnAssist = 5.2f;
         private const float BoostForce = 34f;
         private const float MaxDriveSpeed = 29f;
         private const float MaxReverseSpeed = 15f;
@@ -610,8 +616,10 @@ namespace RetrowaveRocket
             var forwardDelta = desiredSpeed - forwardSpeed;
             var maxStep = accel * Time.fixedDeltaTime;
             forwardDelta = Mathf.Clamp(forwardDelta, -maxStep, maxStep);
+            var lateralCorrection = Mathf.Clamp(-lateralSpeed, -GroundVelocityTurnAssist, GroundVelocityTurnAssist);
 
             _rigidbody.AddForce(surfaceForward * forwardDelta, ForceMode.VelocityChange);
+            _rigidbody.AddForce(surfaceRight * lateralCorrection, ForceMode.VelocityChange);
             _rigidbody.AddForce(-surfaceRight * lateralSpeed * GroundGrip, ForceMode.Acceleration);
             _rigidbody.AddForce(-planarVelocity * GroundDrag, ForceMode.Acceleration);
             _rigidbody.AddForce(-_groundNormal * GroundStickForce, ForceMode.Acceleration);
@@ -645,6 +653,20 @@ namespace RetrowaveRocket
             var airThrust = transform.forward * (input.Throttle * AirForwardThrust);
             airThrust += transform.right * (input.Steer * AirStrafeThrust);
             _rigidbody.AddForce(airThrust, ForceMode.Acceleration);
+
+            var localAngularVelocity = transform.InverseTransformDirection(_rigidbody.angularVelocity);
+            _rigidbody.AddTorque(transform.right * (-localAngularVelocity.x * AirAngularDamping), ForceMode.Acceleration);
+            _rigidbody.AddTorque(transform.forward * (-localAngularVelocity.z * AirAngularDamping), ForceMode.Acceleration);
+            _rigidbody.AddTorque(transform.up * (-localAngularVelocity.y * AirYawStabilizeTorque), ForceMode.Acceleration);
+
+            var levelAxis = Vector3.Cross(transform.up, Vector3.up);
+            var controlIntent = Mathf.Abs(input.Throttle) + Mathf.Abs(input.Steer) + Mathf.Abs(input.Roll);
+            var levelBlend = Mathf.Lerp(1f, 0.45f, Mathf.Clamp01(controlIntent));
+            _rigidbody.AddTorque(levelAxis * (AirAutoLevelTorque * levelBlend), ForceMode.Acceleration);
+
+            var sidewaysVelocity = Vector3.Project(_rigidbody.linearVelocity, transform.right);
+            _rigidbody.AddForce(-sidewaysVelocity * AirLateralDamping, ForceMode.Acceleration);
+            _rigidbody.AddForce(Vector3.down * AirGravityAssist, ForceMode.Acceleration);
 
             if (input.Brake)
             {

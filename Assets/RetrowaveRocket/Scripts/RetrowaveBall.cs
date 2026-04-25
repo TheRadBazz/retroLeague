@@ -7,13 +7,22 @@ namespace RetrowaveRocket
     public sealed class RetrowaveBall : NetworkBehaviour
     {
         private const float MaxBallSpeed = 44f;
-        private const float BaseHitSpeed = 6f;
-        private const float SpeedTransferScale = 0.72f;
-        private const float ForwardInfluence = 0.38f;
-        private const float UpwardBias = 0.22f;
-        private const float OffsetLiftScale = 0.9f;
-        private const float MaxHitVelocityChange = 24f;
+        private const float BaseHitSpeed = 1.8f;
+        private const float MinimumTouchSpeed = 0.85f;
+        private const float SpeedTransferScale = 0.46f;
+        private const float ContactVelocityInfluence = 0.44f;
+        private const float FrontHitInfluence = 0.22f;
+        private const float UpwardBias = 0.14f;
+        private const float TopTouchLift = 0.52f;
+        private const float CenterTouchLift = 0.16f;
+        private const float MaxHitVelocityChange = 12.5f;
         private const float MaxHitSpin = 18f;
+        private const float TopTouchJuggleBoost = 0.8f;
+        private const float StrongHitMomentumThreshold = 10.5f;
+        private const float StrongHitApproachThreshold = 8f;
+        private const float PlayerMomentumCarry = 0.24f;
+        private const float PlayerMinimumCarry = 0.75f;
+        private const float PlayerForwardRetention = 0.94f;
 
         private Rigidbody _rigidbody;
         private MeshRenderer _renderer;
@@ -123,38 +132,105 @@ namespace RetrowaveRocket
                 return;
             }
 
+            var contactPoint = collision.contactCount > 0 ? collision.GetContact(0).point : transform.position;
+            var contactVelocity = player.Body.GetPointVelocity(contactPoint);
+            var relativeContactVelocity = contactVelocity - _rigidbody.GetPointVelocity(contactPoint);
             var playerVelocity = player.Body.linearVelocity;
             var playerForward = player.transform.forward;
-            var contactPoint = collision.contactCount > 0 ? collision.GetContact(0).point : transform.position;
             var hitOffset = transform.position - contactPoint;
-            var hitDirection = transform.position - player.transform.position;
+            var contactNormal = hitOffset.sqrMagnitude > 0.0001f
+                ? hitOffset.normalized
+                : (transform.position - player.transform.position).normalized;
+            var relativeVelocityDirection = relativeContactVelocity.sqrMagnitude > 0.0001f
+                ? relativeContactVelocity.normalized
+                : playerForward;
+            var localBallPosition = player.transform.InverseTransformPoint(transform.position);
+            var frontFactor = Mathf.Clamp01((localBallPosition.z + 0.35f) / 1.45f);
+            var topFactor = Mathf.Clamp01((localBallPosition.y + 0.05f) / 1.2f);
+            var centerFactor = 1f - Mathf.Clamp01(Mathf.Abs(localBallPosition.x) / 0.95f);
 
-            if (hitDirection.sqrMagnitude < 0.001f)
+            if (contactNormal.sqrMagnitude < 0.001f)
             {
-                hitDirection = transform.position - contactPoint;
+                contactNormal = playerForward;
             }
 
-            if (hitDirection.sqrMagnitude < 0.001f)
+            var liftAmount = UpwardBias + topFactor * TopTouchLift + centerFactor * CenterTouchLift;
+            var launchDirection = (
+                contactNormal * 0.62f
+                + relativeVelocityDirection * ContactVelocityInfluence
+                + playerForward * (FrontHitInfluence + frontFactor * 0.18f)
+                + Vector3.up * liftAmount).normalized;
+
+            if (topFactor > 0.35f && centerFactor > 0.25f)
             {
-                hitDirection = playerForward;
+                var juggleDirection = (Vector3.up * 0.82f + playerForward * 0.28f).normalized;
+                launchDirection = Vector3.Slerp(launchDirection, juggleDirection, topFactor * centerFactor * 0.45f);
             }
 
-            hitDirection = hitDirection.normalized;
-            var offsetLift = Mathf.Clamp(hitOffset.y / Mathf.Max(transform.localScale.y * 0.5f, 0.001f), -0.9f, 0.9f);
-            var launchDirection = (hitDirection * (1f - ForwardInfluence) + playerForward * ForwardInfluence + Vector3.up * (UpwardBias + Mathf.Max(0f, offsetLift) * OffsetLiftScale)).normalized;
-
-            var speedContribution = playerVelocity.magnitude * SpeedTransferScale;
-            var closingContribution = Mathf.Max(0f, Vector3.Dot(playerVelocity, launchDirection));
-            var desiredVelocityChange = BaseHitSpeed + speedContribution + closingContribution * 0.35f;
-            desiredVelocityChange = Mathf.Clamp(desiredVelocityChange, BaseHitSpeed, MaxHitVelocityChange);
+            var playerSpeedContribution = playerVelocity.magnitude * SpeedTransferScale;
+            var closingContribution = Mathf.Max(0f, Vector3.Dot(relativeContactVelocity, contactNormal));
+            var forwardContribution = Mathf.Max(0f, Vector3.Dot(contactVelocity, playerForward));
+            var verticalContribution = Mathf.Max(0f, contactVelocity.y);
+            var rawVelocityChange = BaseHitSpeed
+                                    + playerSpeedContribution
+                                    + closingContribution * 0.18f
+                                    + forwardContribution * 0.08f
+                                    + verticalContribution * 0.16f
+                                    + topFactor * centerFactor * TopTouchJuggleBoost;
+            var impactStrength = Mathf.InverseLerp(
+                2.25f,
+                StrongHitMomentumThreshold,
+                playerVelocity.magnitude + closingContribution * 0.65f + forwardContribution * 0.2f);
+            var approachStrength = Mathf.InverseLerp(1.5f, StrongHitApproachThreshold, closingContribution);
+            var touchStrength = Mathf.Clamp01(impactStrength * 0.7f + approachStrength * 0.3f);
+            var desiredVelocityChange = Mathf.Lerp(MinimumTouchSpeed, rawVelocityChange, touchStrength);
+            desiredVelocityChange = Mathf.Clamp(desiredVelocityChange, MinimumTouchSpeed, MaxHitVelocityChange);
 
             _rigidbody.AddForce(launchDirection * desiredVelocityChange, ForceMode.VelocityChange);
+            PreservePlayerMomentum(player, playerForward, contactNormal, desiredVelocityChange, frontFactor, centerFactor);
 
-            var hitSpin = Vector3.Cross(hitOffset.normalized, playerVelocity.normalized) * Mathf.Min(playerVelocity.magnitude * 0.55f, MaxHitSpin);
+            var spinAxis = Vector3.Cross(contactNormal, relativeVelocityDirection);
+            var hitSpin = spinAxis * Mathf.Min(relativeContactVelocity.magnitude * 0.42f + player.Body.angularVelocity.magnitude * 0.28f, MaxHitSpin);
 
             if (float.IsFinite(hitSpin.x) && float.IsFinite(hitSpin.y) && float.IsFinite(hitSpin.z))
             {
                 _rigidbody.AddTorque(hitSpin, ForceMode.VelocityChange);
+            }
+        }
+
+        private static void PreservePlayerMomentum(
+            RetrowavePlayerController player,
+            Vector3 playerForward,
+            Vector3 contactNormal,
+            float desiredVelocityChange,
+            float frontFactor,
+            float centerFactor)
+        {
+            if (player.Body == null)
+            {
+                return;
+            }
+
+            var currentVelocity = player.Body.linearVelocity;
+            var forwardSpeed = Mathf.Max(0f, Vector3.Dot(currentVelocity, playerForward));
+            var retainVelocity = Mathf.Max(0f, forwardSpeed * PlayerForwardRetention);
+            var sustainVelocity = Mathf.Max(
+                PlayerMinimumCarry,
+                desiredVelocityChange * PlayerMomentumCarry + forwardSpeed * 0.05f);
+            sustainVelocity *= Mathf.Lerp(0.72f, 1.08f, Mathf.Clamp01(frontFactor * 0.75f + centerFactor * 0.25f));
+
+            if (forwardSpeed < retainVelocity)
+            {
+                player.Body.AddForce(playerForward * (retainVelocity - forwardSpeed), ForceMode.VelocityChange);
+            }
+
+            player.Body.AddForce(playerForward * sustainVelocity, ForceMode.VelocityChange);
+
+            var backwardLoss = Vector3.Dot(player.Body.linearVelocity, -contactNormal);
+
+            if (backwardLoss > 0.1f)
+            {
+                player.Body.AddForce(contactNormal * Mathf.Min(backwardLoss * 0.55f, 2.2f), ForceMode.VelocityChange);
             }
         }
     }
