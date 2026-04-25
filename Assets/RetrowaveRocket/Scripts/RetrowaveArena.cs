@@ -306,7 +306,7 @@ namespace RetrowaveRocket
         public const float PowerUpRespawnSeconds = 8f;
         public const float SpeedBurstMultiplier = 1.4f;
         public const float SpeedBurstDuration = 4.5f;
-        public const float PassiveBoostRegen = 6f;
+        public const float PassiveBoostRegen = 2.5f;
 
         private static RetrowaveMatchSettings _currentSettings = RetrowaveMatchSettings.Default;
         private static RetrowaveArenaLayout _currentLayout = RetrowaveArenaLayout.Resolve(RetrowaveMatchSettings.Default);

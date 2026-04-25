@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Reflection;
+using System.Text;
 using TMPro;
 using Unity.Netcode;
 using Unity.Netcode.Components;
@@ -100,6 +101,41 @@ namespace RetrowaveRocket
         private Button _gameplayReturnButton;
         private TMP_Text _gameplayStartButtonLabel;
         private bool _gameplayMenuWasVisible;
+        private bool _showHudInfoPanel = true;
+        private GameObject _gameplayHudRoot;
+        private GameObject _gameplayHudInfoRoot;
+        private GameObject _gameplayHudInfoCollapsedRoot;
+        private GameObject _gameplayHudScoreboardRoot;
+        private GameObject _gameplayHudGoalRoot;
+        private TMP_Text _hudScoreStateText;
+        private TMP_Text _hudScoreClockText;
+        private TMP_Text _hudBlueScoreText;
+        private TMP_Text _hudOrangeScoreText;
+        private TMP_Text _hudInfoToggleText;
+        private TMP_Text _hudInfoConnectionText;
+        private TMP_Text _hudInfoPhaseText;
+        private TMP_Text _hudInfoRoleText;
+        private TMP_Text _hudInfoHintText;
+        private TMP_Text _hudInfoCollapsedText;
+        private TMP_Text _hudGaugeTitleText;
+        private TMP_Text _hudSpeedValueText;
+        private TMP_Text _hudSpeedLabelText;
+        private TMP_Text _hudBoostValueText;
+        private TMP_Text _hudGaugeStatusText;
+        private Image _hudSpeedFillImage;
+        private Image _hudBoostFillImage;
+        private RectTransform _hudSpeedBarRect;
+        private RectTransform _hudBoostBarRect;
+        private RectTransform _hudSpeedMarkerRect;
+        private RectTransform _hudBoostMarkerRect;
+        private TMP_Text _hudScoreboardTitleText;
+        private TMP_Text _hudScoreboardSummaryText;
+        private TMP_Text _hudScoreboardBlueText;
+        private TMP_Text _hudScoreboardOrangeText;
+        private TMP_Text _hudScoreboardSpectatorText;
+        private TMP_Text _hudGoalHeadlineText;
+        private TMP_Text _hudGoalScoreText;
+        private TMP_Text _hudGoalDetailText;
         private float _serverSessionReconcileTimer;
         private RetrowaveMatchSettings _currentMatchSettings = RetrowaveMatchSettings.Default;
 
@@ -180,6 +216,10 @@ namespace RetrowaveRocket
                 _showScoreboard = false;
                 ClearGoalCelebrationState();
                 SetGameplayMenuVisible(false);
+                if (_gameplayHudRoot != null)
+                {
+                    _gameplayHudRoot.SetActive(false);
+                }
                 return;
             }
 
@@ -189,6 +229,10 @@ namespace RetrowaveRocket
                 _showScoreboard = false;
                 ClearGoalCelebrationState();
                 SetGameplayMenuVisible(false);
+                if (_gameplayHudRoot != null)
+                {
+                    _gameplayHudRoot.SetActive(false);
+                }
                 return;
             }
 
@@ -199,6 +243,11 @@ namespace RetrowaveRocket
                 HandleRoleSelectionHotkeys(keyboard);
                 HandleSpectatorFollowHotkeys(keyboard);
                 _showScoreboard = keyboard.tabKey.isPressed;
+
+                if (keyboard.qKey.wasPressedThisFrame)
+                {
+                    _showHudInfoPanel = !_showHudInfoPanel;
+                }
 
                 if (keyboard.escapeKey.wasPressedThisFrame && !RequiresRoleSelection())
                 {
@@ -223,6 +272,7 @@ namespace RetrowaveRocket
             }
 
             RefreshGameplayMenuState();
+            RefreshGameplayHudState();
         }
 
         private void HandleRoleSelectionHotkeys(Keyboard keyboard)
@@ -280,6 +330,7 @@ namespace RetrowaveRocket
                 SceneManager.sceneLoaded -= HandleSceneLoaded;
                 ClearGoalCelebrationState();
                 DestroyGameplayMenuOverlay();
+                DestroyGameplayHudOverlay();
                 _instance = null;
             }
         }
@@ -310,18 +361,6 @@ namespace RetrowaveRocket
             {
                 DrawGameplayFallbackMenu();
                 return;
-            }
-
-            DrawHud();
-
-            if (_goalCelebrationVisible)
-            {
-                DrawGoalCelebrationIndicator();
-            }
-
-            if (_showScoreboard)
-            {
-                DrawScoreboard();
             }
 
             if ((_showPauseMenu || RequiresRoleSelection()) && _gameplayMenuRoot == null)
@@ -892,6 +931,1051 @@ namespace RetrowaveRocket
             }
 
             _gameplayMenuRoot.SetActive(isVisible);
+        }
+
+        private void EnsureGameplayHudOverlay()
+        {
+            if (_gameplayHudRoot != null)
+            {
+                return;
+            }
+
+            _gameplayMenuFont = TMP_Settings.defaultFontAsset;
+
+            _gameplayHudRoot = new GameObject("Retrowave Gameplay HUD", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
+            _gameplayHudRoot.transform.SetParent(transform, false);
+
+            var canvas = _gameplayHudRoot.GetComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = 160;
+
+            var scaler = _gameplayHudRoot.GetComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1920f, 1080f);
+            scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
+            scaler.matchWidthOrHeight = 0.5f;
+
+            var scoreStrip = CreateHudPanel(
+                _gameplayHudRoot.transform,
+                "ScoreStrip",
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0f, -26f),
+                new Vector2(560f, 108f),
+                new Color(0.03f, 0.06f, 0.12f, 0.9f),
+                new Color(0.15f, 0.85f, 1f, 0.45f));
+
+            _hudScoreStateText = CreateHudText(
+                scoreStrip.transform,
+                "State",
+                "WARMUP",
+                16f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Center,
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0f, -14f),
+                new Vector2(360f, 26f),
+                new Color(0.6f, 0.91f, 1f, 1f));
+
+            _hudBlueScoreText = CreateHudText(
+                scoreStrip.transform,
+                "BlueScore",
+                "0",
+                40f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Center,
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(-176f, -6f),
+                new Vector2(110f, 56f),
+                RetrowaveStyle.BlueGlow);
+
+            _hudScoreClockText = CreateHudText(
+                scoreStrip.transform,
+                "Clock",
+                "0:00",
+                30f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Center,
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0f, -6f),
+                new Vector2(220f, 50f),
+                Color.white);
+
+            _hudOrangeScoreText = CreateHudText(
+                scoreStrip.transform,
+                "OrangeScore",
+                "0",
+                40f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Center,
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(176f, -6f),
+                new Vector2(110f, 56f),
+                RetrowaveStyle.OrangeBase);
+
+            _gameplayHudInfoRoot = CreateHudPanel(
+                _gameplayHudRoot.transform,
+                "InfoPanel",
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(28f, -44f),
+                new Vector2(462f, 232f),
+                new Color(0.04f, 0.08f, 0.14f, 0.88f),
+                new Color(0.11f, 0.74f, 0.95f, 0.36f));
+
+            CreateHudText(
+                _gameplayHudInfoRoot.transform,
+                "InfoHeader",
+                "MATCH STATUS",
+                20f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Left,
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(22f, -16f),
+                new Vector2(240f, 30f),
+                Color.white);
+
+            _hudInfoToggleText = CreateHudText(
+                _gameplayHudInfoRoot.transform,
+                "InfoToggle",
+                "Q HIDE",
+                15f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Right,
+                new Vector2(1f, 1f),
+                new Vector2(1f, 1f),
+                new Vector2(1f, 1f),
+                new Vector2(-20f, -18f),
+                new Vector2(120f, 24f),
+                new Color(0.56f, 0.88f, 1f, 0.95f));
+
+            _hudInfoConnectionText = CreateHudText(
+                _gameplayHudInfoRoot.transform,
+                "Connection",
+                string.Empty,
+                17f,
+                FontStyles.Normal,
+                TextAlignmentOptions.TopLeft,
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(22f, -54f),
+                new Vector2(398f, 38f),
+                new Color(0.86f, 0.92f, 0.98f, 1f));
+
+            _hudInfoPhaseText = CreateHudText(
+                _gameplayHudInfoRoot.transform,
+                "Phase",
+                string.Empty,
+                18f,
+                FontStyles.Bold,
+                TextAlignmentOptions.TopLeft,
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(22f, -92f),
+                new Vector2(398f, 42f),
+                Color.white);
+
+            _hudInfoRoleText = CreateHudText(
+                _gameplayHudInfoRoot.transform,
+                "Role",
+                string.Empty,
+                17f,
+                FontStyles.Normal,
+                TextAlignmentOptions.TopLeft,
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(22f, -138f),
+                new Vector2(398f, 54f),
+                new Color(0.82f, 0.89f, 1f, 1f));
+
+            _hudInfoHintText = CreateHudText(
+                _gameplayHudInfoRoot.transform,
+                "Hint",
+                string.Empty,
+                15f,
+                FontStyles.Normal,
+                TextAlignmentOptions.TopLeft,
+                new Vector2(0f, 0f),
+                new Vector2(0f, 0f),
+                new Vector2(0f, 0f),
+                new Vector2(22f, 18f),
+                new Vector2(398f, 58f),
+                new Color(0.58f, 0.86f, 1f, 0.95f));
+
+            _gameplayHudInfoCollapsedRoot = CreateHudPanel(
+                _gameplayHudRoot.transform,
+                "InfoCollapsed",
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(28f, -44f),
+                new Vector2(208f, 50f),
+                new Color(0.03f, 0.07f, 0.13f, 0.82f),
+                new Color(0.11f, 0.74f, 0.95f, 0.28f));
+
+            _hudInfoCollapsedText = CreateHudText(
+                _gameplayHudInfoCollapsedRoot.transform,
+                "CollapsedText",
+                "Q show match info",
+                16f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Center,
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                Vector2.zero,
+                new Vector2(180f, 28f),
+                new Color(0.72f, 0.92f, 1f, 1f));
+
+            var gaugesPanel = CreateHudPanel(
+                _gameplayHudRoot.transform,
+                "GaugesPanel",
+                new Vector2(1f, 0f),
+                new Vector2(1f, 0f),
+                new Vector2(1f, 0f),
+                new Vector2(-28f, 28f),
+                new Vector2(430f, 196f),
+                new Color(0.03f, 0.05f, 0.11f, 0.9f),
+                new Color(0.96f, 0.34f, 0.74f, 0.28f));
+
+            _hudGaugeTitleText = CreateHudText(
+                gaugesPanel.transform,
+                "GaugeTitle",
+                "DRIVE",
+                18f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Left,
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(22f, -18f),
+                new Vector2(210f, 28f),
+                Color.white);
+
+            _hudGaugeStatusText = CreateHudText(
+                gaugesPanel.transform,
+                "GaugeStatus",
+                string.Empty,
+                15f,
+                FontStyles.Normal,
+                TextAlignmentOptions.Right,
+                new Vector2(1f, 1f),
+                new Vector2(1f, 1f),
+                new Vector2(1f, 1f),
+                new Vector2(-20f, -18f),
+                new Vector2(170f, 24f),
+                new Color(0.57f, 0.86f, 1f, 0.95f));
+
+            _hudSpeedValueText = CreateHudText(
+                gaugesPanel.transform,
+                "SpeedValue",
+                "0.0",
+                44f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Left,
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(22f, -58f),
+                new Vector2(180f, 52f),
+                Color.white);
+
+            _hudSpeedLabelText = CreateHudText(
+                gaugesPanel.transform,
+                "SpeedLabel",
+                "SPEED",
+                14f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Left,
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(24f, -102f),
+                new Vector2(120f, 22f),
+                new Color(0.62f, 0.9f, 1f, 0.88f));
+
+            CreateHudBar(
+                gaugesPanel.transform,
+                "SpeedBar",
+                new Vector2(24f, -130f),
+                new Vector2(382f, 18f),
+                new Color(0.08f, 0.12f, 0.18f, 0.95f),
+                new Color(0.96f, 0.34f, 0.74f, 1f),
+                out _hudSpeedFillImage,
+                out _hudSpeedBarRect,
+                out _hudSpeedMarkerRect);
+
+            _hudBoostValueText = CreateHudText(
+                gaugesPanel.transform,
+                "BoostValue",
+                "0%",
+                26f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Left,
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(22f, -146f),
+                new Vector2(140f, 34f),
+                new Color(1f, 0.9f, 0.96f, 1f));
+
+            CreateHudText(
+                gaugesPanel.transform,
+                "BoostLabel",
+                "BOOST",
+                14f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Left,
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(148f, -148f),
+                new Vector2(110f, 24f),
+                new Color(0.62f, 0.9f, 1f, 0.88f));
+
+            CreateHudBar(
+                gaugesPanel.transform,
+                "BoostBar",
+                new Vector2(24f, -172f),
+                new Vector2(382f, 14f),
+                new Color(0.08f, 0.12f, 0.18f, 0.95f),
+                new Color(0.11f, 0.87f, 1f, 1f),
+                out _hudBoostFillImage,
+                out _hudBoostBarRect,
+                out _hudBoostMarkerRect);
+
+            _gameplayHudScoreboardRoot = CreateHudPanel(
+                _gameplayHudRoot.transform,
+                "Scoreboard",
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0f, -148f),
+                new Vector2(1180f, 620f),
+                new Color(0.02f, 0.04f, 0.09f, 0.95f),
+                new Color(0.12f, 0.8f, 1f, 0.34f));
+
+            _hudScoreboardTitleText = CreateHudText(
+                _gameplayHudScoreboardRoot.transform,
+                "Title",
+                "Lobby Scoreboard",
+                28f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Center,
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0f, -26f),
+                new Vector2(700f, 36f),
+                Color.white);
+
+            _hudScoreboardSummaryText = CreateHudText(
+                _gameplayHudScoreboardRoot.transform,
+                "Summary",
+                string.Empty,
+                16f,
+                FontStyles.Normal,
+                TextAlignmentOptions.Center,
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0f, -64f),
+                new Vector2(900f, 26f),
+                new Color(0.63f, 0.88f, 1f, 0.94f));
+
+            _hudScoreboardBlueText = CreateScoreboardSection(
+                _gameplayHudScoreboardRoot.transform,
+                "BlueSection",
+                new Vector2(-372f, -118f),
+                new Vector2(320f, 452f),
+                "BLUE TEAM",
+                RetrowaveStyle.BlueGlow);
+
+            _hudScoreboardOrangeText = CreateScoreboardSection(
+                _gameplayHudScoreboardRoot.transform,
+                "OrangeSection",
+                new Vector2(0f, -118f),
+                new Vector2(320f, 452f),
+                "ORANGE TEAM",
+                RetrowaveStyle.OrangeBase);
+
+            _hudScoreboardSpectatorText = CreateScoreboardSection(
+                _gameplayHudScoreboardRoot.transform,
+                "SpectatorSection",
+                new Vector2(372f, -118f),
+                new Vector2(320f, 452f),
+                "SPECTATORS",
+                new Color(0.8f, 0.62f, 1f, 1f));
+
+            _gameplayHudGoalRoot = CreateHudPanel(
+                _gameplayHudRoot.transform,
+                "GoalBanner",
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0f, -126f),
+                new Vector2(760f, 170f),
+                new Color(0.03f, 0.03f, 0.08f, 0.95f),
+                new Color(1f, 0.42f, 0.72f, 0.32f));
+
+            _hudGoalHeadlineText = CreateHudText(
+                _gameplayHudGoalRoot.transform,
+                "GoalHeadline",
+                string.Empty,
+                34f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Center,
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0f, -26f),
+                new Vector2(620f, 44f),
+                Color.white);
+
+            _hudGoalScoreText = CreateHudText(
+                _gameplayHudGoalRoot.transform,
+                "GoalScore",
+                string.Empty,
+                26f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Center,
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0f, -4f),
+                new Vector2(520f, 36f),
+                Color.white);
+
+            _hudGoalDetailText = CreateHudText(
+                _gameplayHudGoalRoot.transform,
+                "GoalDetail",
+                string.Empty,
+                18f,
+                FontStyles.Normal,
+                TextAlignmentOptions.Center,
+                new Vector2(0.5f, 0f),
+                new Vector2(0.5f, 0f),
+                new Vector2(0.5f, 0f),
+                new Vector2(0f, 22f),
+                new Vector2(620f, 46f),
+                new Color(0.93f, 0.95f, 1f, 0.96f));
+
+            _gameplayHudInfoCollapsedRoot.SetActive(false);
+            _gameplayHudScoreboardRoot.SetActive(false);
+            _gameplayHudGoalRoot.SetActive(false);
+        }
+
+        private void DestroyGameplayHudOverlay()
+        {
+            if (_gameplayHudRoot != null)
+            {
+                Destroy(_gameplayHudRoot);
+                _gameplayHudRoot = null;
+            }
+
+            _gameplayHudInfoRoot = null;
+            _gameplayHudInfoCollapsedRoot = null;
+            _gameplayHudScoreboardRoot = null;
+            _gameplayHudGoalRoot = null;
+            _hudScoreStateText = null;
+            _hudScoreClockText = null;
+            _hudBlueScoreText = null;
+            _hudOrangeScoreText = null;
+            _hudInfoToggleText = null;
+            _hudInfoConnectionText = null;
+            _hudInfoPhaseText = null;
+            _hudInfoRoleText = null;
+            _hudInfoHintText = null;
+            _hudInfoCollapsedText = null;
+            _hudGaugeTitleText = null;
+            _hudSpeedValueText = null;
+            _hudSpeedLabelText = null;
+            _hudBoostValueText = null;
+            _hudGaugeStatusText = null;
+            _hudSpeedFillImage = null;
+            _hudBoostFillImage = null;
+            _hudSpeedBarRect = null;
+            _hudBoostBarRect = null;
+            _hudSpeedMarkerRect = null;
+            _hudBoostMarkerRect = null;
+            _hudScoreboardTitleText = null;
+            _hudScoreboardSummaryText = null;
+            _hudScoreboardBlueText = null;
+            _hudScoreboardOrangeText = null;
+            _hudScoreboardSpectatorText = null;
+            _hudGoalHeadlineText = null;
+            _hudGoalScoreText = null;
+            _hudGoalDetailText = null;
+        }
+
+        private void RefreshGameplayHudState()
+        {
+            if (_gameplayHudRoot == null)
+            {
+                return;
+            }
+
+            var isVisible = _networkManager != null
+                            && _networkManager.IsListening
+                            && IsGameplayScene(SceneManager.GetActiveScene());
+            _gameplayHudRoot.SetActive(isVisible);
+
+            if (!isVisible)
+            {
+                return;
+            }
+
+            var matchManager = GetActiveMatchManager();
+            var localPlayer = RetrowavePlayerController.LocalOwner;
+            var localAddress = _networkManager.IsClient && !_networkManager.IsHost ? _address : GetJoinAddressForDisplay();
+            var status = _networkManager.IsHost ? "HOST" : (_networkManager.IsServer ? "SERVER" : "CLIENT");
+
+            if (_gameplayHudInfoRoot != null)
+            {
+                _gameplayHudInfoRoot.SetActive(_showHudInfoPanel);
+            }
+
+            if (_gameplayHudInfoCollapsedRoot != null)
+            {
+                _gameplayHudInfoCollapsedRoot.SetActive(!_showHudInfoPanel);
+            }
+
+            if (_hudInfoConnectionText != null)
+            {
+                _hudInfoConnectionText.text = $"{status}  {localAddress}:{_port}";
+            }
+
+            if (_hudInfoToggleText != null)
+            {
+                _hudInfoToggleText.text = "Q HIDE";
+            }
+
+            if (_hudInfoCollapsedText != null)
+            {
+                _hudInfoCollapsedText.text = "Q show match info";
+            }
+
+            if (matchManager != null)
+            {
+                if (_hudScoreStateText != null)
+                {
+                    _hudScoreStateText.text = matchManager.IsWarmup ? "WARMUP LOBBY" : $"ROUND {Mathf.Max(1, matchManager.CurrentRoundNumber)}";
+                }
+
+                if (_hudScoreClockText != null)
+                {
+                    _hudScoreClockText.text = matchManager.IsWarmup
+                        ? FormatRoundDuration(matchManager.RoundDurationSeconds)
+                        : FormatRoundClock(matchManager.RoundTimeRemaining);
+                }
+
+                if (_hudBlueScoreText != null)
+                {
+                    _hudBlueScoreText.text = matchManager.BlueScore.ToString();
+                }
+
+                if (_hudOrangeScoreText != null)
+                {
+                    _hudOrangeScoreText.text = matchManager.OrangeScore.ToString();
+                }
+
+                if (_hudInfoPhaseText != null)
+                {
+                    _hudInfoPhaseText.text = matchManager.IsWarmup
+                        ? $"Warmup live. Max players {matchManager.MaxPlayers}."
+                        : $"Live match. {FormatRoundClock(matchManager.RoundTimeRemaining)} left in round {Mathf.Max(1, matchManager.CurrentRoundNumber)}.";
+                }
+            }
+            else
+            {
+                if (_hudScoreStateText != null)
+                {
+                    _hudScoreStateText.text = "SYNCING MATCH";
+                }
+
+                if (_hudScoreClockText != null)
+                {
+                    _hudScoreClockText.text = "--:--";
+                }
+
+                if (_hudBlueScoreText != null)
+                {
+                    _hudBlueScoreText.text = "-";
+                }
+
+                if (_hudOrangeScoreText != null)
+                {
+                    _hudOrangeScoreText.text = "-";
+                }
+
+                if (_hudInfoPhaseText != null)
+                {
+                    _hudInfoPhaseText.text = "Waiting for the match manager to finish syncing.";
+                }
+            }
+
+            if (_hudInfoRoleText != null)
+            {
+                if (TryGetLocalLobbyEntry(out var entry))
+                {
+                    var roleLine = $"Role: {GetRoleLabel(entry)}";
+
+                    if (!entry.HasSelectedRole)
+                    {
+                        roleLine += "\nChoose blue, orange, or spectator to enter the lobby.";
+                    }
+                    else if (entry.QueuedForNextRound)
+                    {
+                        roleLine += "\nYour team switch is queued for the next round.";
+                    }
+                    else if (entry.IsHost && matchManager != null && matchManager.IsWarmup)
+                    {
+                        roleLine += matchManager.CanStartMatch
+                            ? "\nBoth teams are ready. Open Esc to start."
+                            : "\nMatch start unlocks once blue and orange both have a player.";
+                    }
+
+                    _hudInfoRoleText.text = roleLine;
+                }
+                else
+                {
+                    _hudInfoRoleText.text = localPlayer != null
+                        ? $"Driving: {localPlayer.Team}"
+                        : RetrowaveCameraRig.GetSpectatorCameraLabel();
+                }
+            }
+
+            if (_hudInfoHintText != null)
+            {
+                var hint = "Esc match menu  •  Tab scoreboard  •  Q hide panel";
+
+                if (CanCycleWarmupSpectatorTargets())
+                {
+                    hint += "\nWarmup spectator cam: [ / ] cycles player follow.";
+                }
+
+                _hudInfoHintText.text = hint;
+            }
+
+            if (_hudGaugeTitleText != null)
+            {
+                _hudGaugeTitleText.text = localPlayer != null ? $"{localPlayer.Team.ToString().ToUpperInvariant()} DRIVER" : "SPECTATOR CAM";
+            }
+
+            if (localPlayer != null)
+            {
+                if (_hudSpeedValueText != null)
+                {
+                    _hudSpeedValueText.text = $"{localPlayer.CurrentSpeed:0.0}";
+                }
+
+                if (_hudSpeedLabelText != null)
+                {
+                    _hudSpeedLabelText.text = "SPEED";
+                }
+
+                if (_hudBoostValueText != null)
+                {
+                    _hudBoostValueText.text = $"{localPlayer.BoostAmount:0}%";
+                }
+
+                if (_hudGaugeStatusText != null)
+                {
+                    _hudGaugeStatusText.text = localPlayer.HasSpeedBoost
+                        ? "Speed burst"
+                        : (localPlayer.IsGroundedForHud ? "Grounded" : "Airborne");
+                }
+
+                if (_hudSpeedFillImage != null)
+                {
+                    _hudSpeedFillImage.fillAmount = localPlayer.SpeedNormalized;
+                }
+
+                if (_hudBoostFillImage != null)
+                {
+                    _hudBoostFillImage.fillAmount = localPlayer.BoostNormalized;
+                }
+
+                UpdateHudBarMarker(_hudSpeedBarRect, _hudSpeedMarkerRect, localPlayer.SpeedNormalized);
+                UpdateHudBarMarker(_hudBoostBarRect, _hudBoostMarkerRect, localPlayer.BoostNormalized);
+            }
+            else
+            {
+                if (_hudSpeedValueText != null)
+                {
+                    _hudSpeedValueText.text = "--";
+                }
+
+                if (_hudSpeedLabelText != null)
+                {
+                    _hudSpeedLabelText.text = "CAM";
+                }
+
+                if (_hudBoostValueText != null)
+                {
+                    _hudBoostValueText.text = "--";
+                }
+
+                if (_hudGaugeStatusText != null)
+                {
+                    _hudGaugeStatusText.text = RetrowaveCameraRig.GetSpectatorCameraLabel();
+                }
+
+                if (_hudSpeedFillImage != null)
+                {
+                    _hudSpeedFillImage.fillAmount = 0f;
+                }
+
+                if (_hudBoostFillImage != null)
+                {
+                    _hudBoostFillImage.fillAmount = 0f;
+                }
+
+                UpdateHudBarMarker(_hudSpeedBarRect, _hudSpeedMarkerRect, 0f);
+                UpdateHudBarMarker(_hudBoostBarRect, _hudBoostMarkerRect, 0f);
+            }
+
+            if (_gameplayHudScoreboardRoot != null)
+            {
+                _gameplayHudScoreboardRoot.SetActive(_showScoreboard && matchManager != null);
+            }
+
+            if (_showScoreboard && matchManager != null)
+            {
+                if (_hudScoreboardTitleText != null)
+                {
+                    _hudScoreboardTitleText.text = matchManager.IsWarmup
+                        ? "Lobby Scoreboard"
+                        : $"Live Scoreboard  •  Blue {matchManager.BlueScore} : {matchManager.OrangeScore} Orange";
+                }
+
+                if (_hudScoreboardSummaryText != null)
+                {
+                    _hudScoreboardSummaryText.text = matchManager.IsWarmup
+                        ? $"Warmup open  •  Round timer {FormatRoundDuration(matchManager.RoundDurationSeconds)}  •  Max players {matchManager.MaxPlayers}"
+                        : $"Round {Mathf.Max(1, matchManager.CurrentRoundNumber)}  •  {FormatRoundClock(matchManager.RoundTimeRemaining)} remaining  •  Hold Tab to view";
+                }
+
+                if (_hudScoreboardBlueText != null)
+                {
+                    _hudScoreboardBlueText.text = BuildScoreboardSectionText(RetrowaveLobbyRole.Blue, matchManager);
+                }
+
+                if (_hudScoreboardOrangeText != null)
+                {
+                    _hudScoreboardOrangeText.text = BuildScoreboardSectionText(RetrowaveLobbyRole.Orange, matchManager);
+                }
+
+                if (_hudScoreboardSpectatorText != null)
+                {
+                    _hudScoreboardSpectatorText.text = BuildScoreboardSectionText(RetrowaveLobbyRole.Spectator, matchManager, includeUnselected: true);
+                }
+            }
+
+            if (_gameplayHudGoalRoot != null)
+            {
+                _gameplayHudGoalRoot.SetActive(_goalCelebrationVisible);
+            }
+
+            if (_goalCelebrationVisible)
+            {
+                var teamColor = _goalCelebrationTeam == RetrowaveTeam.Blue
+                    ? RetrowaveStyle.BlueGlow
+                    : RetrowaveStyle.OrangeBase;
+                var teamLabel = _goalCelebrationTeam == RetrowaveTeam.Blue ? "BLUE TEAM" : "ORANGE TEAM";
+
+                if (_hudGoalHeadlineText != null)
+                {
+                    _hudGoalHeadlineText.text = $"{teamLabel} SCORES";
+                    _hudGoalHeadlineText.color = teamColor;
+                }
+
+                if (_hudGoalScoreText != null)
+                {
+                    _hudGoalScoreText.text = $"Blue {_goalCelebrationBlueScore}  -  {_goalCelebrationOrangeScore} Orange";
+                }
+
+                if (_hudGoalDetailText != null)
+                {
+                    _hudGoalDetailText.text = $"{_goalCelebrationScorer} found the finish. Resetting field...";
+                }
+            }
+        }
+
+        private string BuildScoreboardSectionText(RetrowaveLobbyRole role, RetrowaveMatchManager matchManager, bool includeUnselected = false)
+        {
+            var entries = new List<RetrowaveLobbyEntry>();
+
+            for (var i = 0; i < matchManager.LobbyEntries.Count; i++)
+            {
+                var entry = matchManager.LobbyEntries[i];
+
+                if (!includeUnselected && !entry.HasSelectedRole)
+                {
+                    continue;
+                }
+
+                if (includeUnselected)
+                {
+                    if (entry.HasSelectedRole && entry.Role != role)
+                    {
+                        continue;
+                    }
+                }
+                else if (entry.Role != role)
+                {
+                    continue;
+                }
+
+                entries.Add(entry);
+            }
+
+            entries.Sort(static (left, right) =>
+            {
+                var goalCompare = right.Goals.CompareTo(left.Goals);
+
+                if (goalCompare != 0)
+                {
+                    return goalCompare;
+                }
+
+                var assistCompare = right.Assists.CompareTo(left.Assists);
+
+                if (assistCompare != 0)
+                {
+                    return assistCompare;
+                }
+
+                return left.ClientId.CompareTo(right.ClientId);
+            });
+
+            if (entries.Count == 0)
+            {
+                return "No players in this section yet.";
+            }
+
+            var builder = new StringBuilder(entries.Count * 48);
+
+            for (var i = 0; i < entries.Count; i++)
+            {
+                var entry = entries[i];
+                var playerLabel = entry.HasSelectedRole ? entry.DisplayName.ToString() : $"{entry.DisplayName} (choosing)";
+
+                if (entry.IsHost)
+                {
+                    playerLabel += " [Host]";
+                }
+
+                if (entry.QueuedForNextRound)
+                {
+                    playerLabel += " [Next]";
+                }
+
+                builder.Append(playerLabel);
+                builder.Append('\n');
+                builder.Append("G ");
+                builder.Append(entry.Goals);
+                builder.Append("   A ");
+                builder.Append(entry.Assists);
+                builder.Append("   P ");
+                builder.Append(entry.PingMs);
+                builder.Append(" ms");
+
+                if (i < entries.Count - 1)
+                {
+                    builder.Append("\n\n");
+                }
+            }
+
+            return builder.ToString();
+        }
+
+        private GameObject CreateHudPanel(
+            Transform parent,
+            string name,
+            Vector2 anchorMin,
+            Vector2 anchorMax,
+            Vector2 pivot,
+            Vector2 anchoredPosition,
+            Vector2 size,
+            Color backgroundColor,
+            Color outlineColor)
+        {
+            var panel = CreateUiObject(name, parent, typeof(RectTransform), typeof(Image));
+            var rect = panel.GetComponent<RectTransform>();
+            rect.anchorMin = anchorMin;
+            rect.anchorMax = anchorMax;
+            rect.pivot = pivot;
+            rect.anchoredPosition = anchoredPosition;
+            rect.sizeDelta = size;
+
+            var image = panel.GetComponent<Image>();
+            image.color = backgroundColor;
+
+            var outline = panel.AddComponent<Outline>();
+            outline.effectColor = outlineColor;
+            outline.effectDistance = new Vector2(2f, 2f);
+            return panel;
+        }
+
+        private TMP_Text CreateHudText(
+            Transform parent,
+            string name,
+            string textValue,
+            float fontSize,
+            FontStyles fontStyle,
+            TextAlignmentOptions alignment,
+            Vector2 anchorMin,
+            Vector2 anchorMax,
+            Vector2 pivot,
+            Vector2 anchoredPosition,
+            Vector2 size,
+            Color color)
+        {
+            var textObject = CreateUiObject(name, parent, typeof(RectTransform), typeof(TextMeshProUGUI));
+            var rect = textObject.GetComponent<RectTransform>();
+            rect.anchorMin = anchorMin;
+            rect.anchorMax = anchorMax;
+            rect.pivot = pivot;
+            rect.anchoredPosition = anchoredPosition;
+
+            if (anchorMin == anchorMax)
+            {
+                rect.sizeDelta = size;
+            }
+            else
+            {
+                rect.offsetMin = new Vector2(anchoredPosition.x, anchoredPosition.y);
+                rect.offsetMax = new Vector2(size.x, size.y);
+            }
+
+            var text = textObject.GetComponent<TextMeshProUGUI>();
+            text.font = _gameplayMenuFont;
+            text.fontSize = fontSize;
+            text.fontStyle = fontStyle;
+            text.alignment = alignment;
+            text.color = color;
+            text.textWrappingMode = TextWrappingModes.Normal;
+            text.overflowMode = TextOverflowModes.Overflow;
+            text.text = textValue;
+            return text;
+        }
+
+        private void CreateHudBar(
+            Transform parent,
+            string name,
+            Vector2 anchoredPosition,
+            Vector2 size,
+            Color backgroundColor,
+            Color fillColor,
+            out Image fillImage,
+            out RectTransform barRect,
+            out RectTransform markerRect)
+        {
+            var background = CreateUiObject(name, parent, typeof(RectTransform), typeof(Image));
+            barRect = background.GetComponent<RectTransform>();
+            barRect.anchorMin = new Vector2(0f, 1f);
+            barRect.anchorMax = new Vector2(0f, 1f);
+            barRect.pivot = new Vector2(0f, 1f);
+            barRect.anchoredPosition = anchoredPosition;
+            barRect.sizeDelta = size;
+            background.GetComponent<Image>().color = backgroundColor;
+
+            var fill = CreateUiObject("Fill", background.transform, typeof(RectTransform), typeof(Image));
+            var fillRect = fill.GetComponent<RectTransform>();
+            fillRect.anchorMin = Vector2.zero;
+            fillRect.anchorMax = Vector2.one;
+            fillRect.offsetMin = Vector2.zero;
+            fillRect.offsetMax = Vector2.zero;
+
+            fillImage = fill.GetComponent<Image>();
+            fillImage.color = fillColor;
+            fillImage.type = Image.Type.Filled;
+            fillImage.fillMethod = Image.FillMethod.Horizontal;
+            fillImage.fillOrigin = 0;
+            fillImage.fillAmount = 0f;
+
+            var marker = CreateUiObject("Marker", background.transform, typeof(RectTransform), typeof(Image));
+            markerRect = marker.GetComponent<RectTransform>();
+            markerRect.anchorMin = new Vector2(0f, 0.5f);
+            markerRect.anchorMax = new Vector2(0f, 0.5f);
+            markerRect.pivot = new Vector2(0.5f, 0.5f);
+            markerRect.anchoredPosition = new Vector2(0f, 0f);
+            markerRect.sizeDelta = new Vector2(14f, size.y + 10f);
+
+            var markerImage = marker.GetComponent<Image>();
+            markerImage.color = Color.Lerp(fillColor, Color.white, 0.28f);
+        }
+
+        private TMP_Text CreateScoreboardSection(Transform parent, string name, Vector2 anchoredPosition, Vector2 size, string title, Color titleColor)
+        {
+            var section = CreateHudPanel(
+                parent,
+                name,
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                anchoredPosition,
+                size,
+                new Color(0.04f, 0.08f, 0.14f, 0.92f),
+                new Color(titleColor.r, titleColor.g, titleColor.b, 0.22f));
+
+            CreateHudText(
+                section.transform,
+                "Header",
+                title,
+                20f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Left,
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(18f, -16f),
+                new Vector2(220f, 28f),
+                titleColor);
+
+            var body = CreateHudText(
+                section.transform,
+                "Body",
+                string.Empty,
+                16f,
+                FontStyles.Normal,
+                TextAlignmentOptions.TopLeft,
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(18f, -58f),
+                new Vector2(284f, 360f),
+                new Color(0.92f, 0.95f, 1f, 0.98f));
+            body.lineSpacing = 8f;
+            return body;
+        }
+
+        private static void UpdateHudBarMarker(RectTransform barRect, RectTransform markerRect, float normalized)
+        {
+            if (barRect == null || markerRect == null)
+            {
+                return;
+            }
+
+            var width = Mathf.Max(0f, barRect.rect.width);
+            var xPosition = Mathf.Clamp01(normalized) * width;
+            markerRect.anchoredPosition = new Vector2(xPosition, 0f);
         }
 
         private void SelectGameplayRole(RetrowaveLobbyRole role)
@@ -1646,11 +2730,13 @@ namespace RetrowaveRocket
                 RetrowaveCameraRig.EnsureCamera();
                 RetrowaveCameraRig.ShowOverview();
                 EnsureGameplayMenuOverlay();
+                EnsureGameplayHudOverlay();
                 return;
             }
 
             RetrowaveArenaBuilder.SetActive(false);
             DestroyGameplayMenuOverlay();
+            DestroyGameplayHudOverlay();
         }
 
         private void ClearGoalCelebrationState()

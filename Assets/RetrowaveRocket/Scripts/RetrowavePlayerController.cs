@@ -83,6 +83,7 @@ namespace RetrowaveRocket
         private const float MaxReverseSpeed = 15f;
         private const float MaxBoostSpeed = 38f;
         private const float GroundedGraceSeconds = 0.14f;
+        private const float BoostStartThreshold = 0.6f;
 
         private readonly NetworkVariable<int> _teamValue = new(
             (int)RetrowaveTeam.Blue,
@@ -132,6 +133,7 @@ namespace RetrowaveRocket
         private float _cachedRoll;
         private bool _cachedBoost;
         private bool _cachedBrake;
+        private bool _boostRequiresRelease;
         private bool _isGrounded;
         private Vector3 _groundNormal = Vector3.up;
         private float _coyoteTimer;
@@ -145,7 +147,12 @@ namespace RetrowaveRocket
         public bool HasSelectedRole => _hasSelectedRole.Value;
         public bool IsArenaParticipant => HasSelectedRole && LobbyRole != RetrowaveLobbyRole.Spectator;
         public float BoostNormalized => Mathf.Clamp01(_boostAmount.Value / RetrowaveArenaConfig.MaxBoost);
+        public float BoostAmount => Mathf.Clamp(_boostAmount.Value, 0f, RetrowaveArenaConfig.MaxBoost);
         public bool HasSpeedBoost => _speedBoostTimer.Value > 0.05f;
+        public float CurrentSpeed => _rigidbody != null ? _rigidbody.linearVelocity.magnitude : 0f;
+        public float MaxHudSpeed => MaxBoostSpeed * RetrowaveArenaConfig.SpeedBurstMultiplier;
+        public float SpeedNormalized => Mathf.Clamp01(CurrentSpeed / Mathf.Max(0.01f, MaxHudSpeed));
+        public bool IsGroundedForHud => _isGrounded;
         public Rigidbody Body => _rigidbody;
         public ulong ControllingClientId => OwnerClientId;
 
@@ -346,6 +353,7 @@ namespace RetrowaveRocket
             _isGrounded = false;
             _groundProbeCount = 0;
             _coyoteTimer = 0f;
+            _boostRequiresRelease = false;
         }
 
         public void SetSpectatorStateServer(bool hasSelectedRole)
@@ -370,6 +378,7 @@ namespace RetrowaveRocket
             _coyoteTimer = 0f;
             _latestInput = default;
             _boostFx.Value = false;
+            _boostRequiresRelease = false;
         }
 
         public void RequestRoleSelection(RetrowaveLobbyRole role)
@@ -418,6 +427,7 @@ namespace RetrowaveRocket
                 _cachedBrake = false;
                 _jumpQueued = false;
                 _resetQueued = false;
+                _boostRequiresRelease = false;
                 return;
             }
 
@@ -436,8 +446,8 @@ namespace RetrowaveRocket
                 keyboardThrottle -= keyboard.sKey.isPressed ? 1f : 0f;
                 keyboardSteer += keyboard.dKey.isPressed ? 1f : 0f;
                 keyboardSteer -= keyboard.aKey.isPressed ? 1f : 0f;
-                keyboardRoll += keyboard.eKey.isPressed ? 1f : 0f;
-                keyboardRoll -= keyboard.qKey.isPressed ? 1f : 0f;
+                keyboardRoll += keyboard.cKey.isPressed ? 1f : 0f;
+                keyboardRoll -= keyboard.zKey.isPressed ? 1f : 0f;
                 keyboardBoost = keyboard.leftShiftKey.isPressed || keyboard.rightShiftKey.isPressed;
                 keyboardBrake = keyboard.leftCtrlKey.isPressed || keyboard.rightCtrlKey.isPressed;
 
@@ -481,6 +491,16 @@ namespace RetrowaveRocket
                     _resetQueued = true;
                 }
             }
+
+            if (!_cachedBoost)
+            {
+                _boostRequiresRelease = false;
+            }
+            else if (_boostRequiresRelease || _boostAmount.Value <= 0.01f)
+            {
+                _cachedBoost = false;
+                _boostRequiresRelease = true;
+            }
         }
 
         private void SimulateMovement(RetrowavePlayerInputState input)
@@ -511,12 +531,18 @@ namespace RetrowaveRocket
 
             HandleJump(input, treatedAsGrounded);
 
-            var isBoosting = input.Boost && _boostAmount.Value > 0.25f;
+            var isBoosting = input.Boost && _boostAmount.Value > BoostStartThreshold;
 
             if (isBoosting)
             {
                 ApplyBoost(treatedAsGrounded);
                 _boostAmount.Value = Mathf.Max(0f, _boostAmount.Value - 28f * Time.fixedDeltaTime);
+
+                if (_boostAmount.Value <= 0.01f)
+                {
+                    isBoosting = false;
+                    _boostRequiresRelease = true;
+                }
             }
 
             _boostFx.Value = isBoosting;
