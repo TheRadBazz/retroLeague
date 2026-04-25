@@ -1,0 +1,38 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 70b9034436c14f0b8f70d89bcb93d57f, type: 3}
+  m_Name: RetrowaveMusicProfile
+  m_EditorClassIdentifier: 
+  MasterVolume: 0.78
+  CrossfadeDuration: 1.35
+  MainMenu:
+    Tracks:
+    - {fileID: 8300000, guid: a4157eac71a524d5e85d2fb6f4649506, type: 3}
+    Volume: 0.9
+    Loop: 1
+  WarmupLobby:
+    Tracks:
+    - {fileID: 8300000, guid: 922d5d5a514064268aa5ae4158dbaeea, type: 3}
+    - {fileID: 8300000, guid: 20d47a4d10e7241a7a1e2aa6b5f2cabf, type: 3}
+    Volume: 0.8
+    Loop: 1
+  LiveMatch:
+    Tracks:
+    - {fileID: 8300000, guid: 82bf2334c19b8492497cf2953404f3ff, type: 3}
+    - {fileID: 8300000, guid: 05fdb9e1a095c4194992de32f04ba638, type: 3}
+    Volume: 0.84
+    Loop: 1
+  GoalScored:
+    Tracks:
+    - {fileID: 8300000, guid: 8d29d62e8d81143b59a5ebdb824bb6a6, type: 3}
+    Volume: 1
+    Loop: 0
