@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: ce1ac2b921fac004984b09fb89c16c04
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 360208
+  packageName: Sport Car Free 5
+  packageVersion: 1.0
+  assetPath: Assets/SportCar/Models/SportCar_5/Materials/Body.mat
+  uploadId: 864042

@@ -336,6 +336,27 @@ namespace RetrowaveRocket
             RecalculateSpawnSlots();
         }
 
+        public void HandlePlayerDisplayName(ulong clientId, string displayName)
+        {
+            if (!IsServer)
+            {
+                return;
+            }
+
+            EnsureLobbyEntry(clientId);
+
+            var index = GetLobbyEntryIndex(clientId);
+
+            if (index < 0)
+            {
+                return;
+            }
+
+            var entry = _lobbyEntries[index];
+            entry.DisplayName = new FixedString32Bytes(RetrowaveGameBootstrap.NormalizeDisplayName(displayName));
+            _lobbyEntries[index] = entry;
+        }
+
         public void HandlePlayerRoleSelection(ulong clientId, RetrowaveLobbyRole role)
         {
             if (!IsServer)

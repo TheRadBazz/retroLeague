@@ -36,8 +36,10 @@ namespace RetrowaveRocket
 
         private UIMenuManager _menuManager;
         private TMP_FontAsset _font;
+        private TMP_InputField _joinNameField;
         private TMP_InputField _joinAddressField;
         private TMP_InputField _joinPortField;
+        private TMP_InputField _hostNameField;
         private TMP_InputField _hostAddressField;
         private TMP_InputField _hostPortField;
         private TMP_Text _roundDurationValueText;
@@ -62,6 +64,7 @@ namespace RetrowaveRocket
         private int _roundDurationIndex = 1;
         private int _maxPlayersIndex = 1;
         private int _arenaSizeIndex = 0;
+        private bool _syncingDisplayNameFields;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Install()
@@ -294,9 +297,11 @@ namespace RetrowaveRocket
         {
             ConfigurePanelLayout(parent);
             CreatePanelText(parent, "JoinIntro", "Join an active server by entering the host machine's LAN IP and port. Use the host tab on another machine to create the match first.", 18f, new Color(0.89f, 0.92f, 0.96f, 1f), 48f);
+            _joinNameField = CreateInputRow(parent, "Display Name", RetrowaveGameBootstrap.Instance != null ? RetrowaveGameBootstrap.Instance.PreferredDisplayName : "Player", characterLimit: 24);
             _joinAddressField = CreateInputRow(parent, "Server Address", RetrowaveGameBootstrap.Instance != null ? RetrowaveGameBootstrap.Instance.DefaultAddress : "127.0.0.1");
             _joinPortField = CreateInputRow(parent, "Port", RetrowaveGameBootstrap.Instance != null ? RetrowaveGameBootstrap.Instance.DefaultPort : "7777", numeric: true);
             CreatePanelText(parent, "JoinHint", "Tip: the host's local address is shown in the host tab, so copying that value between devices should be enough on the same network.", 16f, new Color(0.72f, 0.82f, 0.92f, 1f), 44f);
+            BindDisplayNameField(_joinNameField, isHostField: false);
         }
 
         private void BuildHostPanel(Transform parent)
@@ -304,6 +309,7 @@ namespace RetrowaveRocket
             ConfigurePanelLayout(parent);
             CreatePanelText(parent, "HostIntro", "Host a match locally and let the arena scale up as player count increases. Larger lobbies automatically force a larger generated field so movement never feels cramped.", 18f, new Color(0.89f, 0.92f, 0.96f, 1f), 48f);
 
+            _hostNameField = CreateInputRow(parent, "Display Name", RetrowaveGameBootstrap.Instance != null ? RetrowaveGameBootstrap.Instance.PreferredDisplayName : "Host", characterLimit: 24);
             var hostAddress = RetrowaveGameBootstrap.Instance != null ? RetrowaveGameBootstrap.Instance.SuggestedHostAddress : "127.0.0.1";
             _hostAddressField = CreateInputRow(parent, "Host Address", hostAddress);
             _hostPortField = CreateInputRow(parent, "Port", RetrowaveGameBootstrap.Instance != null ? RetrowaveGameBootstrap.Instance.DefaultPort : "7777", numeric: true);
@@ -312,6 +318,7 @@ namespace RetrowaveRocket
             _maxPlayersValueText = CreateSelectorRow(parent, "Max Players", () => StepMaxPlayers(-1), () => StepMaxPlayers(1));
             _arenaSizeValueText = CreateSelectorRow(parent, "Arena Size", () => StepArenaSize(-1), () => StepArenaSize(1));
             _hostSummaryText = CreatePanelText(parent, "HostSummary", string.Empty, 16f, new Color(0.59f, 0.86f, 1f, 1f), 52f);
+            BindDisplayNameField(_hostNameField, isHostField: true);
         }
 
         private void BuildFooter(Transform parent)
@@ -424,7 +431,7 @@ namespace RetrowaveRocket
 
             if (_activeTab == ConnectionTab.Join)
             {
-                if (RetrowaveGameBootstrap.Instance.BeginClientFromMenu(_joinAddressField.text, _joinPortField.text, out var joinMessage))
+                if (RetrowaveGameBootstrap.Instance.BeginClientFromMenu(_joinNameField.text, _joinAddressField.text, _joinPortField.text, out var joinMessage))
                 {
                     SetInteractable(false);
                 }
@@ -433,7 +440,7 @@ namespace RetrowaveRocket
                 return;
             }
 
-            if (RetrowaveGameBootstrap.Instance.BeginHostFromMenu(_hostAddressField.text, _hostPortField.text, BuildHostSettings(), out var hostMessage))
+            if (RetrowaveGameBootstrap.Instance.BeginHostFromMenu(_hostNameField.text, _hostAddressField.text, _hostPortField.text, BuildHostSettings(), out var hostMessage))
             {
                 SetInteractable(false);
             }
@@ -549,7 +556,7 @@ namespace RetrowaveRocket
             return CreateHeaderText(parent, name, value, fontSize, FontStyles.Normal, color, preferredHeight);
         }
 
-        private TMP_InputField CreateInputRow(Transform parent, string label, string value, bool numeric = false)
+        private TMP_InputField CreateInputRow(Transform parent, string label, string value, bool numeric = false, int characterLimit = 0)
         {
             var row = CreateUiObject($"{label} Row", parent, typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
             row.GetComponent<LayoutElement>().preferredHeight = 58f;
@@ -600,9 +607,64 @@ namespace RetrowaveRocket
             input.customCaretColor = true;
             input.caretColor = RetrowaveStyle.BlueGlow;
             input.selectionColor = new Color(0.14f, 0.45f, 0.75f, 0.45f);
+            input.characterLimit = characterLimit;
 
             RegisterInteractive(input);
             return input;
+        }
+
+        private void BindDisplayNameField(TMP_InputField field, bool isHostField)
+        {
+            if (field == null)
+            {
+                return;
+            }
+
+            field.onValueChanged.AddListener(value => SyncDisplayNameFields(value, isHostField));
+        }
+
+        private void SyncDisplayNameFields(string value, bool fromHostField)
+        {
+            if (_syncingDisplayNameFields)
+            {
+                return;
+            }
+
+            _syncingDisplayNameFields = true;
+
+            var normalized = string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
+
+            if (normalized.Length > 24)
+            {
+                normalized = normalized[..24];
+            }
+
+            if (fromHostField)
+            {
+                if (_joinNameField != null && _joinNameField.text != normalized)
+                {
+                    _joinNameField.text = normalized;
+                }
+
+                if (_hostNameField != null && _hostNameField.text != normalized)
+                {
+                    _hostNameField.text = normalized;
+                }
+            }
+            else
+            {
+                if (_hostNameField != null && _hostNameField.text != normalized)
+                {
+                    _hostNameField.text = normalized;
+                }
+
+                if (_joinNameField != null && _joinNameField.text != normalized)
+                {
+                    _joinNameField.text = normalized;
+                }
+            }
+
+            _syncingDisplayNameFields = false;
         }
 
         private TMP_Text CreateValueRow(Transform parent, string label, string value)

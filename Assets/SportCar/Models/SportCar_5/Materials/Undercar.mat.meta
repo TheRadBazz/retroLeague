@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 31c282d9bf8e28d4e929546dff34c9ba
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 360208
+  packageName: Sport Car Free 5
+  packageVersion: 1.0
+  assetPath: Assets/SportCar/Models/SportCar_5/Materials/Undercar.mat
+  uploadId: 864042

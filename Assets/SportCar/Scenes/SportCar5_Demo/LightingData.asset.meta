@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: bf7a9ff91fb69d6488884eb2211623eb
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 112000000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 360208
+  packageName: Sport Car Free 5
+  packageVersion: 1.0
+  assetPath: Assets/SportCar/Scenes/SportCar5_Demo/LightingData.asset
+  uploadId: 864042

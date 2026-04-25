@@ -60,6 +60,7 @@ namespace RetrowaveRocket
 
         public const string MainMenuSceneName = "MainMenu";
         public const string GameplaySceneName = "SampleScene";
+        private const string SportCarResourcePath = "RetrowaveRocket/SportCar_5";
 
         private static RetrowaveGameBootstrap _instance;
         private static readonly FieldInfo GlobalObjectIdHashField = typeof(NetworkObject).GetField("GlobalObjectIdHash", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -72,6 +73,7 @@ namespace RetrowaveRocket
         private GameObject _powerUpPrefab;
         private GameObject _matchManagerPrefab;
         private string _address = "127.0.0.1";
+        private string _preferredDisplayName = "Player";
         private ushort _port = 7777;
         private PendingConnectionMode _pendingConnectionMode;
         private bool _showPauseMenu;
@@ -108,6 +110,7 @@ namespace RetrowaveRocket
         public string DefaultAddress => _address;
         public string DefaultPort => _port.ToString();
         public string SuggestedHostAddress => ResolvePreferredAddress();
+        public string PreferredDisplayName => _preferredDisplayName;
         public RetrowaveMatchSettings CurrentMatchSettings => _currentMatchSettings;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -133,6 +136,23 @@ namespace RetrowaveRocket
             _instance?.PrepareForProcessExit();
         }
 
+        public static string NormalizeDisplayName(string value)
+        {
+            var trimmed = string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
+
+            if (trimmed.Length == 0)
+            {
+                trimmed = Environment.UserName;
+            }
+
+            if (string.IsNullOrWhiteSpace(trimmed))
+            {
+                trimmed = "Player";
+            }
+
+            return trimmed.Length > 24 ? trimmed[..24] : trimmed;
+        }
+
         private void Awake()
         {
             if (_instance != null && _instance != this)
@@ -145,6 +165,7 @@ namespace RetrowaveRocket
             DontDestroyOnLoad(gameObject);
             _defaultFixedDeltaTime = Time.fixedDeltaTime;
             _address = ResolvePreferredAddress();
+            _preferredDisplayName = NormalizeDisplayName(Environment.UserName);
 
             EnsureNetworkRuntime();
             SceneManager.sceneLoaded += HandleSceneLoaded;
@@ -309,15 +330,17 @@ namespace RetrowaveRocket
             }
         }
 
-        public bool BeginHostFromMenu(string address, string portText, RetrowaveMatchSettings matchSettings, out string message)
+        public bool BeginHostFromMenu(string displayName, string address, string portText, RetrowaveMatchSettings matchSettings, out string message)
         {
+            _preferredDisplayName = NormalizeDisplayName(displayName);
             _currentMatchSettings = matchSettings;
             RetrowaveArenaConfig.ApplyMatchSettings(matchSettings);
             return BeginConnectionFromMenu(PendingConnectionMode.Host, address, portText, out message);
         }
 
-        public bool BeginClientFromMenu(string address, string portText, out string message)
+        public bool BeginClientFromMenu(string displayName, string address, string portText, out string message)
         {
+            _preferredDisplayName = NormalizeDisplayName(displayName);
             _currentMatchSettings = RetrowaveMatchSettings.Default;
             RetrowaveArenaConfig.ApplyMatchSettings(_currentMatchSettings);
             return BeginConnectionFromMenu(PendingConnectionMode.Client, address, portText, out message);
@@ -1687,28 +1710,11 @@ namespace RetrowaveRocket
             prefab.AddComponent<NetworkRigidbody>();
             prefab.AddComponent<RetrowavePlayerController>();
 
-            var visual = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            visual.name = "Body Visual";
-            visual.transform.SetParent(prefab.transform, false);
-            visual.transform.localPosition = new Vector3(0f, -0.02f, 0f);
-            visual.transform.localScale = new Vector3(1.3f, 0.8f, 2.1f);
-
-            var visualCollider = visual.GetComponent<BoxCollider>();
-
-            if (visualCollider != null)
+            if (!TryAttachSportCarVisual(prefab.transform))
             {
-                visualCollider.enabled = false;
+                CreateFallbackVehicleVisual(prefab.transform);
             }
 
-            var bodyRenderer = visual.GetComponent<MeshRenderer>();
-            bodyRenderer.sharedMaterial = RetrowaveStyle.CreateLitMaterial(
-                RetrowaveStyle.BlueBase,
-                RetrowaveStyle.BlueGlow * 2f,
-                0.86f,
-                0.08f);
-
-            CreateBoosterVisual(visual.transform, new Vector3(-0.35f, 0f, -0.85f));
-            CreateBoosterVisual(visual.transform, new Vector3(0.35f, 0f, -0.85f));
             FinalizeRuntimePrefab(prefab, 0xA1000001u, isTemplate);
             return prefab;
         }
@@ -1782,6 +1788,91 @@ namespace RetrowaveRocket
             prefab.AddComponent<RetrowaveMatchManager>();
             FinalizeRuntimePrefab(prefab, 0xA1000004u, isTemplate);
             return prefab;
+        }
+
+        private static bool TryAttachSportCarVisual(Transform parent)
+        {
+            var sportCarPrefab = Resources.Load<GameObject>(SportCarResourcePath);
+
+            if (sportCarPrefab == null)
+            {
+                Debug.LogWarning($"RetrowaveGameBootstrap: could not load SportsCar resource at Resources/{SportCarResourcePath}. Falling back to the generated cube body.");
+                return false;
+            }
+
+            var visual = Instantiate(sportCarPrefab, parent, false);
+            visual.name = "Body Visual";
+            DisableChildColliders(visual);
+            FitVisualToBounds(visual.transform, new Vector3(1.3f, 0.8f, 2.1f), new Vector3(0f, -0.02f, 0f));
+            return true;
+        }
+
+        private static void CreateFallbackVehicleVisual(Transform parent)
+        {
+            var visual = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            visual.name = "Body Visual";
+            visual.transform.SetParent(parent, false);
+            visual.transform.localPosition = new Vector3(0f, -0.02f, 0f);
+            visual.transform.localScale = new Vector3(1.3f, 0.8f, 2.1f);
+
+            var visualCollider = visual.GetComponent<BoxCollider>();
+
+            if (visualCollider != null)
+            {
+                visualCollider.enabled = false;
+            }
+
+            var bodyRenderer = visual.GetComponent<MeshRenderer>();
+            bodyRenderer.sharedMaterial = RetrowaveStyle.CreateLitMaterial(
+                RetrowaveStyle.BlueBase,
+                RetrowaveStyle.BlueGlow * 2f,
+                0.86f,
+                0.08f);
+
+            CreateBoosterVisual(visual.transform, new Vector3(-0.35f, 0f, -0.85f));
+            CreateBoosterVisual(visual.transform, new Vector3(0.35f, 0f, -0.85f));
+        }
+
+        private static void FitVisualToBounds(Transform visualRoot, Vector3 targetSize, Vector3 targetCenter)
+        {
+            var renderers = visualRoot.GetComponentsInChildren<Renderer>(true);
+
+            if (renderers.Length == 0)
+            {
+                return;
+            }
+
+            var bounds = renderers[0].bounds;
+
+            for (var i = 1; i < renderers.Length; i++)
+            {
+                bounds.Encapsulate(renderers[i].bounds);
+            }
+
+            var sourceSize = bounds.size;
+
+            if (sourceSize.x <= 0.001f || sourceSize.y <= 0.001f || sourceSize.z <= 0.001f)
+            {
+                return;
+            }
+
+            var scaleFactor = Mathf.Min(
+                targetSize.x / sourceSize.x,
+                Mathf.Min(targetSize.y / sourceSize.y, targetSize.z / sourceSize.z));
+
+            visualRoot.localScale = Vector3.one * scaleFactor;
+            var scaledCenter = bounds.center * scaleFactor;
+            visualRoot.localPosition = targetCenter - scaledCenter;
+        }
+
+        private static void DisableChildColliders(GameObject root)
+        {
+            var colliders = root.GetComponentsInChildren<Collider>(true);
+
+            for (var i = 0; i < colliders.Length; i++)
+            {
+                colliders[i].enabled = false;
+            }
         }
 
         private static void CreateBoosterVisual(Transform parent, Vector3 localPosition)

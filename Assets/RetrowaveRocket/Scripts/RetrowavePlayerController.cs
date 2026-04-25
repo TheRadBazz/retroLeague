@@ -1,7 +1,9 @@
 using System;
+using TMPro;
 using Unity.Netcode;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.UI;
 
 namespace RetrowaveRocket
 {
@@ -108,8 +110,12 @@ namespace RetrowaveRocket
 
         private Rigidbody _rigidbody;
         private Collider[] _colliders;
-        private MeshRenderer[] _renderers;
+        private MeshRenderer[] _vehicleRenderers;
         private Light _boostLight;
+        private Canvas _nameTagCanvas;
+        private TextMeshProUGUI _nameTagText;
+        private string _appliedDisplayName = string.Empty;
+        private Material _appliedBodyMaterial;
         private RetrowavePlayerInputState _latestInput;
         private Vector3 _spawnPosition;
         private Quaternion _spawnRotation;
@@ -141,8 +147,9 @@ namespace RetrowaveRocket
         {
             _rigidbody = GetComponent<Rigidbody>();
             _colliders = GetComponentsInChildren<Collider>(true);
-            _renderers = GetComponentsInChildren<MeshRenderer>(true);
+            _vehicleRenderers = GetComponentsInChildren<MeshRenderer>(true);
             _boostLight = GetComponentInChildren<Light>(true);
+            EnsureNameTag();
 
             if (_boostLight == null)
             {
@@ -252,6 +259,7 @@ namespace RetrowaveRocket
             if (IsOwner)
             {
                 LocalPlayer = this;
+                SubmitDisplayName();
             }
 
             if (IsServer)
@@ -291,6 +299,12 @@ namespace RetrowaveRocket
         {
             var clampedRole = (RetrowaveLobbyRole)Mathf.Clamp(roleValue, (int)RetrowaveLobbyRole.Spectator, (int)RetrowaveLobbyRole.Orange);
             RetrowaveMatchManager.Instance?.HandlePlayerRoleSelection(OwnerClientId, clampedRole);
+        }
+
+        [ServerRpc]
+        private void SubmitDisplayNameServerRpc(string displayName)
+        {
+            RetrowaveMatchManager.Instance?.HandlePlayerDisplayName(OwnerClientId, displayName);
         }
 
         public void ConfigureServer(RetrowaveTeam team, int spawnIndex)
@@ -691,7 +705,7 @@ namespace RetrowaveRocket
         {
             var shouldShowVehicle = IsArenaParticipant;
 
-            foreach (var renderer in _renderers)
+            foreach (var renderer in _vehicleRenderers)
             {
                 renderer.enabled = shouldShowVehicle;
             }
@@ -704,6 +718,11 @@ namespace RetrowaveRocket
             if (_boostLight != null)
             {
                 _boostLight.enabled = shouldShowVehicle;
+            }
+
+            if (_nameTagCanvas != null)
+            {
+                _nameTagCanvas.enabled = shouldShowVehicle;
             }
 
             if (!IsOwner)
@@ -731,20 +750,46 @@ namespace RetrowaveRocket
 
         private void ApplyTeamVisuals(RetrowaveTeam team)
         {
-            var bodyMaterial = RetrowaveStyle.CreateLitMaterial(
-                RetrowaveStyle.GetTeamBase(team),
-                RetrowaveStyle.GetTeamGlow(team) * 2.6f,
-                0.88f,
-                0.09f);
-
-            foreach (var renderer in _renderers)
+            if (_appliedBodyMaterial != null)
             {
-                renderer.sharedMaterial = bodyMaterial;
+                Destroy(_appliedBodyMaterial);
+                _appliedBodyMaterial = null;
+            }
+
+            for (var rendererIndex = 0; rendererIndex < _vehicleRenderers.Length; rendererIndex++)
+            {
+                var renderer = _vehicleRenderers[rendererIndex];
+                var sharedMaterials = renderer.sharedMaterials;
+                var changed = false;
+
+                for (var materialIndex = 0; materialIndex < sharedMaterials.Length; materialIndex++)
+                {
+                    var material = sharedMaterials[materialIndex];
+
+                    if (material == null || !material.name.StartsWith("Body", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    _appliedBodyMaterial ??= CreateTeamBodyMaterial(material, team);
+                    sharedMaterials[materialIndex] = _appliedBodyMaterial;
+                    changed = true;
+                }
+
+                if (changed)
+                {
+                    renderer.sharedMaterials = sharedMaterials;
+                }
             }
 
             if (_boostLight != null)
             {
                 _boostLight.color = RetrowaveStyle.GetTeamGlow(team);
+            }
+
+            if (_nameTagText != null)
+            {
+                _nameTagText.color = Color.Lerp(RetrowaveStyle.GetTeamGlow(team), Color.white, 0.2f);
             }
         }
 
@@ -758,6 +803,116 @@ namespace RetrowaveRocket
             var targetIntensity = _boostFx.Value ? 11f : 0f;
             _boostLight.intensity = Mathf.Lerp(_boostLight.intensity, targetIntensity, Time.deltaTime * 11f);
             _boostLight.range = _boostFx.Value ? 11f : 5f;
+        }
+
+        private void LateUpdate()
+        {
+            RefreshNameTag();
+        }
+
+        private void SubmitDisplayName()
+        {
+            var displayName = RetrowaveGameBootstrap.Instance != null
+                ? RetrowaveGameBootstrap.Instance.PreferredDisplayName
+                : "Player";
+
+            if (IsServer)
+            {
+                RetrowaveMatchManager.Instance?.HandlePlayerDisplayName(OwnerClientId, displayName);
+                return;
+            }
+
+            SubmitDisplayNameServerRpc(displayName);
+        }
+
+        private void EnsureNameTag()
+        {
+            var canvasObject = new GameObject("Name Tag", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
+            canvasObject.transform.SetParent(transform, false);
+            canvasObject.transform.localPosition = new Vector3(0f, 1.45f, 0f);
+            canvasObject.transform.localRotation = Quaternion.identity;
+
+            _nameTagCanvas = canvasObject.GetComponent<Canvas>();
+            _nameTagCanvas.renderMode = RenderMode.WorldSpace;
+            _nameTagCanvas.worldCamera = Camera.main;
+            _nameTagCanvas.sortingOrder = 40;
+
+            var canvasScaler = canvasObject.GetComponent<CanvasScaler>();
+            canvasScaler.dynamicPixelsPerUnit = 18f;
+
+            var canvasRect = canvasObject.GetComponent<RectTransform>();
+            canvasRect.sizeDelta = new Vector2(220f, 44f);
+            canvasRect.localScale = Vector3.one * 0.01f;
+
+            var textObject = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
+            textObject.transform.SetParent(canvasObject.transform, false);
+
+            var textRect = textObject.GetComponent<RectTransform>();
+            textRect.anchorMin = Vector2.zero;
+            textRect.anchorMax = Vector2.one;
+            textRect.offsetMin = Vector2.zero;
+            textRect.offsetMax = Vector2.zero;
+
+            _nameTagText = textObject.GetComponent<TextMeshProUGUI>();
+            _nameTagText.font = TMP_Settings.defaultFontAsset;
+            _nameTagText.fontSize = 28f;
+            _nameTagText.fontStyle = FontStyles.Bold;
+            _nameTagText.alignment = TextAlignmentOptions.Center;
+            _nameTagText.textWrappingMode = TextWrappingModes.NoWrap;
+            _nameTagText.text = string.Empty;
+        }
+
+        private void RefreshNameTag()
+        {
+            if (_nameTagCanvas == null || _nameTagText == null)
+            {
+                return;
+            }
+
+            if (RetrowaveMatchManager.Instance != null
+                && RetrowaveMatchManager.Instance.TryGetLobbyEntry(OwnerClientId, out var entry))
+            {
+                var displayName = entry.DisplayName.ToString();
+
+                if (!string.Equals(_appliedDisplayName, displayName, StringComparison.Ordinal))
+                {
+                    _appliedDisplayName = displayName;
+                    _nameTagText.text = displayName;
+                }
+            }
+
+            var camera = Camera.main;
+
+            if (camera == null)
+            {
+                return;
+            }
+
+            _nameTagCanvas.worldCamera = camera;
+            _nameTagCanvas.transform.forward = camera.transform.forward;
+        }
+
+        private static Material CreateTeamBodyMaterial(Material source, RetrowaveTeam team)
+        {
+            var bodyMaterial = source != null ? new Material(source) : RetrowaveStyle.CreateLitMaterial(Color.white, Color.black);
+
+            if (bodyMaterial.HasProperty("_BaseColor"))
+            {
+                bodyMaterial.SetColor("_BaseColor", RetrowaveStyle.GetTeamBase(team));
+            }
+
+            if (bodyMaterial.HasProperty("_Color"))
+            {
+                bodyMaterial.SetColor("_Color", RetrowaveStyle.GetTeamBase(team));
+            }
+
+            if (bodyMaterial.HasProperty("_EmissionColor"))
+            {
+                bodyMaterial.EnableKeyword("_EMISSION");
+                bodyMaterial.SetColor("_EmissionColor", RetrowaveStyle.GetTeamGlow(team) * 1.6f);
+            }
+
+            return bodyMaterial;
         }
     }
 }

@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 13a59c16119833b4f9bb0941f4cd6d7c
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 360208
+  packageName: Sport Car Free 5
+  packageVersion: 1.0
+  assetPath: Assets/SportCar/Models/SportCar_5/Materials/FrontLight_Glass.mat
+  uploadId: 864042
