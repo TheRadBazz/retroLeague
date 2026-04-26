@@ -115,6 +115,11 @@ namespace RetrowaveRocket
             NetworkVariableReadPermission.Everyone,
             NetworkVariableWritePermission.Server);
 
+        private readonly NetworkVariable<bool> _podiumPresentationHidden = new(
+            false,
+            NetworkVariableReadPermission.Everyone,
+            NetworkVariableWritePermission.Server);
+
         private Rigidbody _rigidbody;
         private Collider[] _colliders;
         private MeshRenderer[] _vehicleRenderers;
@@ -244,8 +249,13 @@ namespace RetrowaveRocket
                 return;
             }
 
-            if (RetrowaveMatchManager.Instance != null && RetrowaveMatchManager.Instance.IsGoalCelebrationActive)
+            var matchManager = RetrowaveMatchManager.Instance;
+
+            if (matchManager != null && matchManager.IsGameplayLocked)
             {
+                _latestInput = default;
+                _rigidbody.linearVelocity = Vector3.zero;
+                _rigidbody.angularVelocity = Vector3.zero;
                 _boostFx.Value = false;
                 return;
             }
@@ -259,6 +269,7 @@ namespace RetrowaveRocket
             _teamValue.OnValueChanged += HandleTeamChanged;
             _lobbyRoleValue.OnValueChanged += HandleLobbyRoleChanged;
             _hasSelectedRole.OnValueChanged += HandleSelectedRoleChanged;
+            _podiumPresentationHidden.OnValueChanged += HandlePodiumPresentationChanged;
 
             if (!IsServer)
             {
@@ -286,6 +297,7 @@ namespace RetrowaveRocket
             _teamValue.OnValueChanged -= HandleTeamChanged;
             _lobbyRoleValue.OnValueChanged -= HandleLobbyRoleChanged;
             _hasSelectedRole.OnValueChanged -= HandleSelectedRoleChanged;
+            _podiumPresentationHidden.OnValueChanged -= HandlePodiumPresentationChanged;
 
             if (LocalOwner == this)
             {
@@ -347,12 +359,33 @@ namespace RetrowaveRocket
             _rigidbody.linearVelocity = Vector3.zero;
             _rigidbody.angularVelocity = Vector3.zero;
             transform.SetPositionAndRotation(_spawnPosition, _spawnRotation);
+            _podiumPresentationHidden.Value = false;
             _boostAmount.Value = RetrowaveArenaConfig.StartingBoost;
             _speedBoostTimer.Value = 0f;
             _groundNormal = Vector3.up;
             _isGrounded = false;
             _groundProbeCount = 0;
             _coyoteTimer = 0f;
+            _boostRequiresRelease = false;
+        }
+
+        public void SetPodiumPresentationServer(Vector3 position, Quaternion rotation, bool isVisible)
+        {
+            if (!IsServer)
+            {
+                return;
+            }
+
+            _podiumPresentationHidden.Value = !isVisible;
+            _rigidbody.linearVelocity = Vector3.zero;
+            _rigidbody.angularVelocity = Vector3.zero;
+            _rigidbody.isKinematic = true;
+            _rigidbody.useGravity = false;
+            transform.SetPositionAndRotation(position, rotation);
+            _boostAmount.Value = RetrowaveArenaConfig.StartingBoost;
+            _speedBoostTimer.Value = 0f;
+            _latestInput = default;
+            _boostFx.Value = false;
             _boostRequiresRelease = false;
         }
 
@@ -365,6 +398,7 @@ namespace RetrowaveRocket
 
             _lobbyRoleValue.Value = (int)RetrowaveLobbyRole.Spectator;
             _hasSelectedRole.Value = hasSelectedRole;
+            _podiumPresentationHidden.Value = false;
             _rigidbody.linearVelocity = Vector3.zero;
             _rigidbody.angularVelocity = Vector3.zero;
             _rigidbody.isKinematic = true;
@@ -749,9 +783,14 @@ namespace RetrowaveRocket
             RefreshPresentationState();
         }
 
+        private void HandlePodiumPresentationChanged(bool _, bool __)
+        {
+            RefreshPresentationState();
+        }
+
         private void RefreshPresentationState()
         {
-            var shouldShowVehicle = IsArenaParticipant;
+            var shouldShowVehicle = IsArenaParticipant && !_podiumPresentationHidden.Value;
 
             foreach (var renderer in _vehicleRenderers)
             {
@@ -780,7 +819,9 @@ namespace RetrowaveRocket
 
             if (shouldShowVehicle)
             {
-                if (LocalOwner != this)
+                var podiumActive = RetrowaveMatchManager.Instance != null && RetrowaveMatchManager.Instance.IsPodium;
+
+                if (!podiumActive && (LocalOwner != this || !RetrowaveCameraRig.IsFollowing(this)))
                 {
                     LocalOwner = this;
                     RetrowaveCameraRig.AttachTo(this);

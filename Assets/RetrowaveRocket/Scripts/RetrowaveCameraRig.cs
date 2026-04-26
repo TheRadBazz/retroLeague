@@ -13,6 +13,7 @@ namespace RetrowaveRocket
             Overview = 0,
             ControlledPlayer = 1,
             WarmupSpectator = 2,
+            Podium = 3,
         }
 
         private const float DefaultOrbitPitch = 14f;
@@ -79,6 +80,14 @@ namespace RetrowaveRocket
             _instance.AttachInternal(target, FollowMode.WarmupSpectator);
         }
 
+        public static bool IsFollowing(RetrowavePlayerController target)
+        {
+            EnsureCamera();
+            return target != null
+                   && _instance._target == target
+                   && (_instance._followMode == FollowMode.ControlledPlayer || _instance._followMode == FollowMode.WarmupSpectator);
+        }
+
         public static void CycleWarmupSpectatorTarget(int direction, System.Collections.Generic.IReadOnlyList<RetrowavePlayerController> candidates)
         {
             EnsureCamera();
@@ -110,12 +119,29 @@ namespace RetrowaveRocket
         {
             EnsureCamera();
 
+            if (_instance._followMode == FollowMode.Podium)
+            {
+                return "Camera: winners podium";
+            }
+
             if (_instance._followMode == FollowMode.WarmupSpectator && _instance._target != null)
             {
                 return $"Camera: warmup follow on Player {_instance._target.OwnerClientId}";
             }
 
             return "Camera: spectator overview";
+        }
+
+        public static void ShowPodium()
+        {
+            EnsureCamera();
+            _instance._target = null;
+            _instance._followMode = FollowMode.Podium;
+            _instance._velocity = Vector3.zero;
+            _instance._estimatedVelocity = Vector3.zero;
+            _instance.ApplyViewSettings();
+            _instance.UpdatePodiumView(instant: true);
+            _instance.UpdateCursorState(false);
         }
 
         private void AttachInternal(RetrowavePlayerController target, FollowMode followMode)
@@ -163,6 +189,13 @@ namespace RetrowaveRocket
 
             if (_target == null)
             {
+                if (_followMode == FollowMode.Podium)
+                {
+                    UpdatePodiumView(instant: false);
+                    UpdateCursorState(false);
+                    return;
+                }
+
                 UpdateCursorState(false);
                 return;
             }
@@ -216,6 +249,26 @@ namespace RetrowaveRocket
 
             var targetFov = BaseFieldOfView + Mathf.Clamp(bodyVelocity.magnitude * 0.8f, 0f, 18f);
             _camera.fieldOfView = Mathf.Lerp(_camera.fieldOfView, targetFov, Time.deltaTime * 5f);
+        }
+
+        private void UpdatePodiumView(bool instant)
+        {
+            var lookPoint = RetrowavePodiumLayout.CameraLookPoint;
+            var basePosition = RetrowavePodiumLayout.CameraPosition;
+            var orbit = Time.unscaledTime * 0.22f;
+            var desiredPosition = basePosition + new Vector3(Mathf.Sin(orbit) * 2.8f, Mathf.Sin(orbit * 0.7f) * 0.45f, Mathf.Cos(orbit) * 1.4f);
+            var desiredRotation = Quaternion.LookRotation(lookPoint - desiredPosition, Vector3.up);
+
+            if (instant)
+            {
+                transform.SetPositionAndRotation(desiredPosition, desiredRotation);
+                _camera.fieldOfView = 56f;
+                return;
+            }
+
+            transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref _velocity, 0.28f);
+            transform.rotation = Quaternion.Slerp(transform.rotation, desiredRotation, Time.unscaledDeltaTime * 3.5f);
+            _camera.fieldOfView = Mathf.Lerp(_camera.fieldOfView, 56f, Time.unscaledDeltaTime * 2.8f);
         }
 
         private void UpdateOrbit(Transform targetTransform, Vector3 blendedUp, Vector3 bodyVelocity)

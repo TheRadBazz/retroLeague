@@ -365,6 +365,69 @@ namespace RetrowaveRocket
         }
     }
 
+    public static class RetrowavePodiumLayout
+    {
+        public static Vector3 Center
+        {
+            get
+            {
+                var z = -Mathf.Min(28f, RetrowaveArenaConfig.FlatHalfLength * 0.2f);
+                return new Vector3(0f, 0f, z);
+            }
+        }
+
+        public static Quaternion VehicleRotation => Quaternion.LookRotation(Vector3.back, Vector3.up);
+        public static Vector3 CameraLookPoint => Center + new Vector3(0f, 2.7f, 1.6f);
+        public static Vector3 CameraPosition => Center + new Vector3(0f, 8.5f, -23f);
+
+        public static Vector3 GetPlatformPosition(int rank)
+        {
+            var offset = rank switch
+            {
+                0 => new Vector3(0f, 1.1f, 0f),
+                1 => new Vector3(-5.4f, 0.72f, 1.35f),
+                2 => new Vector3(5.4f, 0.52f, 1.35f),
+                _ => Vector3.zero,
+            };
+
+            return Center + offset;
+        }
+
+        public static Vector3 GetPlatformScale(int rank)
+        {
+            return rank switch
+            {
+                0 => new Vector3(4.8f, 2.2f, 4.2f),
+                1 => new Vector3(4.4f, 1.44f, 3.9f),
+                2 => new Vector3(4.4f, 1.04f, 3.9f),
+                _ => Vector3.one,
+            };
+        }
+
+        public static Vector3 GetVehiclePosition(int rank, int totalCount)
+        {
+            if (rank < 3)
+            {
+                var platformPosition = GetPlatformPosition(rank);
+                var platformScale = GetPlatformScale(rank);
+                return new Vector3(
+                    platformPosition.x,
+                    platformPosition.y + platformScale.y * 0.5f + 1.35f,
+                    platformPosition.z);
+            }
+
+            var extraIndex = rank - 3;
+            var extraCount = Mathf.Max(1, totalCount - 3);
+            var columns = Mathf.Clamp(Mathf.CeilToInt(Mathf.Sqrt(extraCount)), 3, 8);
+            var row = extraIndex / columns;
+            var column = extraIndex % columns;
+            var rowCount = Mathf.Min(columns, extraCount - row * columns);
+            var centeredColumn = column - (rowCount - 1) * 0.5f;
+            var offset = new Vector3(centeredColumn * 4.5f, 1.35f, 6.2f + row * 4.5f);
+            return Center + offset;
+        }
+    }
+
     public static class RetrowaveStyle
     {
         private const string RuntimeLitTemplateResourcePath = "RetrowaveRocket/RuntimeLitTemplate";

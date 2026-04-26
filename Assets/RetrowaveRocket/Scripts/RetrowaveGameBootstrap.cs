@@ -100,6 +100,7 @@ namespace RetrowaveRocket
         private Button _gameplayStartButton;
         private Button _gameplayReturnButton;
         private TMP_Text _gameplayStartButtonLabel;
+        private TMP_Text _gameplayReturnButtonLabel;
         private bool _gameplayMenuWasVisible;
         private bool _showHudInfoPanel = true;
         private GameObject _gameplayHudRoot;
@@ -107,6 +108,7 @@ namespace RetrowaveRocket
         private GameObject _gameplayHudInfoCollapsedRoot;
         private GameObject _gameplayHudScoreboardRoot;
         private GameObject _gameplayHudGoalRoot;
+        private GameObject _gameplayHudCountdownRoot;
         private TMP_Text _hudScoreStateText;
         private TMP_Text _hudScoreClockText;
         private TMP_Text _hudBlueScoreText;
@@ -136,9 +138,14 @@ namespace RetrowaveRocket
         private TMP_Text _hudGoalHeadlineText;
         private TMP_Text _hudGoalScoreText;
         private TMP_Text _hudGoalDetailText;
+        private TMP_Text _hudCountdownLabelText;
+        private TMP_Text _hudCountdownValueText;
         private bool _gameplayHudSessionVisible;
         private bool _hudInfoIntroAutoHidePending;
         private float _hudInfoIntroHideAtRealtime;
+        private GameObject _podiumPresentationRoot;
+        private bool _podiumCameraActive;
+        private bool _sessionShutdownInProgress;
         private float _serverSessionReconcileTimer;
         private RetrowaveMatchSettings _currentMatchSettings = RetrowaveMatchSettings.Default;
 
@@ -218,6 +225,7 @@ namespace RetrowaveRocket
                 _showPauseMenu = false;
                 _showScoreboard = false;
                 ClearGoalCelebrationState();
+                ClearPodiumPresentation();
                 SetGameplayMenuVisible(false);
                 if (_gameplayHudRoot != null)
                 {
@@ -232,6 +240,7 @@ namespace RetrowaveRocket
                 _showPauseMenu = false;
                 _showScoreboard = false;
                 ClearGoalCelebrationState();
+                ClearPodiumPresentation();
                 SetGameplayMenuVisible(false);
                 if (_gameplayHudRoot != null)
                 {
@@ -335,6 +344,7 @@ namespace RetrowaveRocket
                 ForceShutdownSession(false, false);
                 SceneManager.sceneLoaded -= HandleSceneLoaded;
                 ClearGoalCelebrationState();
+                ClearPodiumPresentation();
                 DestroyGameplayMenuOverlay();
                 DestroyGameplayHudOverlay();
                 _instance = null;
@@ -455,6 +465,7 @@ namespace RetrowaveRocket
 
             _networkManager.OnServerStarted += HandleServerStarted;
             _networkManager.OnClientConnectedCallback += HandleNetworkClientConnected;
+            _networkManager.OnClientDisconnectCallback += HandleNetworkClientDisconnected;
         }
 
         private bool BeginConnectionFromMenu(PendingConnectionMode mode, string address, string portText, out string message)
@@ -547,6 +558,25 @@ namespace RetrowaveRocket
             }
 
             EnsureServerSessionStateForClient(clientId);
+        }
+
+        private void HandleNetworkClientDisconnected(ulong clientId)
+        {
+            if (_networkManager == null
+                || _sessionShutdownInProgress
+                || _networkManager.IsServer
+                || clientId != _networkManager.LocalClientId)
+            {
+                return;
+            }
+
+            StartCoroutine(ReturnToMainMenuAfterRemoteShutdown());
+        }
+
+        private IEnumerator ReturnToMainMenuAfterRemoteShutdown()
+        {
+            yield return null;
+            ReturnToMainMenu();
         }
 
         private void EnsureServerSessionStateForClient(ulong clientId)
@@ -769,6 +799,7 @@ namespace RetrowaveRocket
             _gameplayStartButtonLabel = _gameplayStartButton.GetComponentInChildren<TextMeshProUGUI>(true);
             _gameplayResumeButton = CreateMenuButton(panel.transform, "ResumeButton", "Resume", new Vector2(-132f, -242f), new Color(0.12f, 0.24f, 0.36f, 1f), HandleGameplayResume);
             _gameplayReturnButton = CreateMenuButton(panel.transform, "ReturnButton", "Return To Main Menu", new Vector2(132f, -242f), new Color(0.26f, 0.12f, 0.16f, 1f), ReturnToMainMenu);
+            _gameplayReturnButtonLabel = _gameplayReturnButton.GetComponentInChildren<TextMeshProUGUI>(true);
 
             SetGameplayMenuVisible(false);
         }
@@ -798,6 +829,7 @@ namespace RetrowaveRocket
             _gameplayStartButton = null;
             _gameplayReturnButton = null;
             _gameplayStartButtonLabel = null;
+            _gameplayReturnButtonLabel = null;
             _gameplayMenuWasVisible = false;
         }
 
@@ -838,10 +870,20 @@ namespace RetrowaveRocket
             var sessionBootstrapPending = RequiresSessionBootstrap();
             var forceSelection = RequiresRoleSelection();
             var wasVisible = _gameplayMenuWasVisible;
+            var matchManager = GetActiveMatchManager();
+            var podiumActive = matchManager != null && matchManager.IsPodium;
+            var matchComplete = matchManager != null && matchManager.IsMatchComplete;
+
+            if (podiumActive)
+            {
+                _showPauseMenu = false;
+            }
+
             var isVisible = _networkManager != null
                             && _networkManager.IsListening
                             && IsGameplayScene(SceneManager.GetActiveScene())
-                            && (_showPauseMenu || forceSelection || sessionBootstrapPending);
+                            && !podiumActive
+                            && (_showPauseMenu || forceSelection || sessionBootstrapPending || matchComplete);
 
             SetGameplayMenuVisible(isVisible);
             _gameplayMenuWasVisible = isVisible;
@@ -851,12 +893,17 @@ namespace RetrowaveRocket
                 return;
             }
 
-            var matchManager = GetActiveMatchManager();
             if (sessionBootstrapPending)
             {
                 _gameplayMenuTitleText.text = "Joining Server";
                 _gameplayMenuBodyText.text = "Waiting for the host to finish syncing the lobby and your player object.";
                 _gameplayMenuHintText.text = "This should resolve automatically once the server finishes session setup.";
+            }
+            else if (matchComplete && matchManager != null)
+            {
+                _gameplayMenuTitleText.text = "Final Score";
+                _gameplayMenuBodyText.text = BuildFinalScoreSummary(matchManager);
+                _gameplayMenuHintText.text = "Change teams here for the next run, or leave the lobby.";
             }
             else
             {
@@ -881,11 +928,16 @@ namespace RetrowaveRocket
             }
 
             _gameplayStartButton.gameObject.SetActive(hostIsPresent);
-            _gameplayResumeButton.gameObject.SetActive(!forceSelection && !sessionBootstrapPending);
+            _gameplayResumeButton.gameObject.SetActive(!forceSelection && !sessionBootstrapPending && !matchComplete);
 
             if (_gameplayStartButtonLabel != null && matchManager != null)
             {
-                _gameplayStartButtonLabel.text = matchManager.IsWarmup ? "Start Match" : "Restart Match";
+                _gameplayStartButtonLabel.text = matchComplete ? "Start New Game" : (matchManager.IsWarmup ? "Start Match" : "Restart Match");
+            }
+
+            if (_gameplayReturnButtonLabel != null)
+            {
+                _gameplayReturnButtonLabel.text = matchComplete && hostIsPresent ? "Exit Game" : "Return To Main Menu";
             }
 
             _gameplayStartButton.interactable = hostCanStart;
@@ -897,6 +949,16 @@ namespace RetrowaveRocket
             if (sessionBootstrapPending)
             {
                 _gameplayMenuFooterText.text = "Connected to the host. Waiting for the multiplayer session to finish initializing.";
+            }
+            else if (matchComplete && hostIsPresent)
+            {
+                _gameplayMenuFooterText.text = hostCanStart
+                    ? "Start New Game returns everyone to a fresh countdown. Exit Game closes the network session."
+                    : "Choose at least one blue and one pink player before starting a new game.";
+            }
+            else if (matchComplete)
+            {
+                _gameplayMenuFooterText.text = "The match has ended. Change teams for the next game or leave the lobby.";
             }
             else if (forceSelection)
             {
@@ -1381,9 +1443,49 @@ namespace RetrowaveRocket
                 new Vector2(620f, 46f),
                 new Color(0.93f, 0.95f, 1f, 0.96f));
 
+            _gameplayHudCountdownRoot = CreateHudPanel(
+                _gameplayHudRoot.transform,
+                "KickoffCountdown",
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0f, 68f),
+                new Vector2(470f, 270f),
+                new Color(0.02f, 0.04f, 0.09f, 0.92f),
+                new Color(0.96f, 0.34f, 0.74f, 0.4f));
+
+            _hudCountdownLabelText = CreateHudText(
+                _gameplayHudCountdownRoot.transform,
+                "Label",
+                string.Empty,
+                24f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Center,
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0f, -34f),
+                new Vector2(380f, 36f),
+                new Color(0.66f, 0.91f, 1f, 1f));
+
+            _hudCountdownValueText = CreateHudText(
+                _gameplayHudCountdownRoot.transform,
+                "Value",
+                string.Empty,
+                112f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Center,
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0f, -20f),
+                new Vector2(380f, 132f),
+                Color.white);
+
             _gameplayHudInfoCollapsedRoot.SetActive(false);
             _gameplayHudScoreboardRoot.SetActive(false);
             _gameplayHudGoalRoot.SetActive(false);
+            _gameplayHudCountdownRoot.SetActive(false);
         }
 
         private void DestroyGameplayHudOverlay()
@@ -1398,6 +1500,7 @@ namespace RetrowaveRocket
             _gameplayHudInfoCollapsedRoot = null;
             _gameplayHudScoreboardRoot = null;
             _gameplayHudGoalRoot = null;
+            _gameplayHudCountdownRoot = null;
             _hudScoreStateText = null;
             _hudScoreClockText = null;
             _hudBlueScoreText = null;
@@ -1427,6 +1530,8 @@ namespace RetrowaveRocket
             _hudGoalHeadlineText = null;
             _hudGoalScoreText = null;
             _hudGoalDetailText = null;
+            _hudCountdownLabelText = null;
+            _hudCountdownValueText = null;
         }
 
         private void RefreshGameplayHudState()
@@ -1466,6 +1571,15 @@ namespace RetrowaveRocket
             var localAddress = _networkManager.IsClient && !_networkManager.IsHost ? _address : GetJoinAddressForDisplay();
             var status = _networkManager.IsHost ? "HOST" : (_networkManager.IsServer ? "SERVER" : "CLIENT");
 
+            if (matchManager != null && matchManager.IsPodium)
+            {
+                EnsurePodiumPresentation(matchManager);
+            }
+            else
+            {
+                ClearPodiumPresentation();
+            }
+
             if (_gameplayHudInfoRoot != null)
             {
                 _gameplayHudInfoRoot.SetActive(_showHudInfoPanel);
@@ -1495,16 +1609,26 @@ namespace RetrowaveRocket
             {
                 if (_hudScoreStateText != null)
                 {
-                    _hudScoreStateText.text = matchManager.IsWarmup
-                        ? "WARMUP LOBBY"
-                        : $"ROUND {Mathf.Max(1, matchManager.CurrentRoundNumber)}/{matchManager.RoundCount}";
+                    _hudScoreStateText.text = matchManager.Phase switch
+                    {
+                        RetrowaveMatchPhase.Warmup => "WARMUP LOBBY",
+                        RetrowaveMatchPhase.Podium => matchManager.HasPodiumWinner ? "WINNERS PODIUM" : "DRAW SHOWCASE",
+                        RetrowaveMatchPhase.MatchComplete => "FINAL SCORE",
+                        RetrowaveMatchPhase.Countdown => "KICKOFF COUNTDOWN",
+                        _ => $"ROUND {Mathf.Max(1, matchManager.CurrentRoundNumber)}/{matchManager.RoundCount}",
+                    };
                 }
 
                 if (_hudScoreClockText != null)
                 {
-                    _hudScoreClockText.text = matchManager.IsWarmup
-                        ? $"{FormatRoundDuration(matchManager.RoundDurationSeconds)} x {matchManager.RoundCount}"
-                        : FormatRoundClock(matchManager.RoundTimeRemaining);
+                    _hudScoreClockText.text = matchManager.Phase switch
+                    {
+                        RetrowaveMatchPhase.Warmup => $"{FormatRoundDuration(matchManager.RoundDurationSeconds)} x {matchManager.RoundCount}",
+                        RetrowaveMatchPhase.Podium => $"{Mathf.CeilToInt(matchManager.PodiumTimeRemaining)}s",
+                        RetrowaveMatchPhase.MatchComplete => "COMPLETE",
+                        RetrowaveMatchPhase.Countdown => Mathf.CeilToInt(matchManager.CountdownTimeRemaining).ToString(),
+                        _ => FormatRoundClock(matchManager.RoundTimeRemaining),
+                    };
                 }
 
                 if (_hudBlueScoreText != null)
@@ -1519,9 +1643,16 @@ namespace RetrowaveRocket
 
                 if (_hudInfoPhaseText != null)
                 {
-                    _hudInfoPhaseText.text = matchManager.IsWarmup
-                        ? $"Warmup live. {FormatRoundDuration(matchManager.RoundDurationSeconds)} x {matchManager.RoundCount} rounds = {FormatRoundDuration(matchManager.RoundDurationSeconds * matchManager.RoundCount)} match. Max players {matchManager.MaxPlayers}."
-                        : $"Live match. {FormatRoundClock(matchManager.RoundTimeRemaining)} left in round {Mathf.Max(1, matchManager.CurrentRoundNumber)}/{matchManager.RoundCount}.";
+                    _hudInfoPhaseText.text = matchManager.Phase switch
+                    {
+                        RetrowaveMatchPhase.Warmup => $"Warmup live. {FormatRoundDuration(matchManager.RoundDurationSeconds)} x {matchManager.RoundCount} rounds = {FormatRoundDuration(matchManager.RoundDurationSeconds * matchManager.RoundCount)} match. Max players {matchManager.MaxPlayers}.",
+                        RetrowaveMatchPhase.Podium => matchManager.HasPodiumWinner
+                            ? $"{GetTeamLabel(matchManager.PodiumWinnerTeam)} podium ceremony. Final menu opens in {Mathf.CeilToInt(matchManager.PodiumTimeRemaining)}."
+                            : $"Draw showcase. Final menu opens in {Mathf.CeilToInt(matchManager.PodiumTimeRemaining)}.",
+                        RetrowaveMatchPhase.MatchComplete => $"Match complete. Final score: Blue {matchManager.BlueScore} - {matchManager.PinkScore} Pink.",
+                        RetrowaveMatchPhase.Countdown => $"Kickoff in {Mathf.CeilToInt(matchManager.CountdownTimeRemaining)}. Cars are locked until play resumes.",
+                        _ => $"Live match. {FormatRoundClock(matchManager.RoundTimeRemaining)} left in round {Mathf.Max(1, matchManager.CurrentRoundNumber)}/{matchManager.RoundCount}.",
+                    };
                 }
             }
             else
@@ -1682,16 +1813,27 @@ namespace RetrowaveRocket
             {
                 if (_hudScoreboardTitleText != null)
                 {
-                    _hudScoreboardTitleText.text = matchManager.IsWarmup
-                        ? "Lobby Scoreboard"
-                        : $"Live Scoreboard  •  Blue {matchManager.BlueScore} : {matchManager.PinkScore} Pink";
+                    _hudScoreboardTitleText.text = matchManager.IsMatchComplete
+                        ? $"Final Score  •  Blue {matchManager.BlueScore} : {matchManager.PinkScore} Pink"
+                        : (matchManager.IsPodium
+                            ? (matchManager.HasPodiumWinner
+                                ? $"{GetTeamLabel(matchManager.PodiumWinnerTeam)} Podium  •  Blue {matchManager.BlueScore} : {matchManager.PinkScore} Pink"
+                                : $"Draw Showcase  •  Blue {matchManager.BlueScore} : {matchManager.PinkScore} Pink")
+                        : (matchManager.IsWarmup
+                            ? "Lobby Scoreboard"
+                            : $"Live Scoreboard  •  Blue {matchManager.BlueScore} : {matchManager.PinkScore} Pink"));
                 }
 
                 if (_hudScoreboardSummaryText != null)
                 {
-                    _hudScoreboardSummaryText.text = matchManager.IsWarmup
-                        ? $"Warmup open  •  {FormatRoundDuration(matchManager.RoundDurationSeconds)} x {matchManager.RoundCount} rounds = {FormatRoundDuration(matchManager.RoundDurationSeconds * matchManager.RoundCount)}  •  Max players {matchManager.MaxPlayers}"
-                        : $"Round {Mathf.Max(1, matchManager.CurrentRoundNumber)}/{matchManager.RoundCount}  •  {FormatRoundClock(matchManager.RoundTimeRemaining)} remaining  •  Hold Tab to view";
+                    _hudScoreboardSummaryText.text = matchManager.Phase switch
+                    {
+                        RetrowaveMatchPhase.Warmup => $"Warmup open  •  {FormatRoundDuration(matchManager.RoundDurationSeconds)} x {matchManager.RoundCount} rounds = {FormatRoundDuration(matchManager.RoundDurationSeconds * matchManager.RoundCount)}  •  Max players {matchManager.MaxPlayers}",
+                        RetrowaveMatchPhase.Podium => $"Ceremony running  •  Final options unlock in {Mathf.CeilToInt(matchManager.PodiumTimeRemaining)}s",
+                        RetrowaveMatchPhase.MatchComplete => "Match concluded  •  Change teams or wait for the host to start a new game",
+                        RetrowaveMatchPhase.Countdown => $"Round {Mathf.Max(1, matchManager.CurrentRoundNumber)}/{matchManager.RoundCount} kickoff in {Mathf.CeilToInt(matchManager.CountdownTimeRemaining)}",
+                        _ => $"Round {Mathf.Max(1, matchManager.CurrentRoundNumber)}/{matchManager.RoundCount}  •  {FormatRoundClock(matchManager.RoundTimeRemaining)} remaining  •  Hold Tab to view",
+                    };
                 }
 
                 if (_hudScoreboardBlueText != null)
@@ -1736,6 +1878,44 @@ namespace RetrowaveRocket
                 if (_hudGoalDetailText != null)
                 {
                     _hudGoalDetailText.text = $"{_goalCelebrationScorer} found the finish. Resetting field...";
+                }
+            }
+
+            if (_gameplayHudCountdownRoot != null)
+            {
+                _gameplayHudCountdownRoot.SetActive(matchManager != null && (matchManager.IsCountdown || matchManager.IsPodium) && !_goalCelebrationVisible);
+            }
+
+            if (matchManager != null && matchManager.IsCountdown)
+            {
+                var countdownValue = Mathf.CeilToInt(matchManager.CountdownTimeRemaining);
+
+                if (_hudCountdownLabelText != null)
+                {
+                    _hudCountdownLabelText.text = Mathf.Max(1, matchManager.CurrentRoundNumber) <= 1
+                        ? "MATCH STARTS IN"
+                        : $"ROUND {Mathf.Max(1, matchManager.CurrentRoundNumber)}/{matchManager.RoundCount} STARTS IN";
+                }
+
+                if (_hudCountdownValueText != null)
+                {
+                    _hudCountdownValueText.text = countdownValue <= 0 ? "GO" : countdownValue.ToString();
+                }
+            }
+            else if (matchManager != null && matchManager.IsPodium)
+            {
+                var podiumSeconds = Mathf.CeilToInt(matchManager.PodiumTimeRemaining);
+
+                if (_hudCountdownLabelText != null)
+                {
+                    _hudCountdownLabelText.text = matchManager.HasPodiumWinner
+                        ? $"{GetTeamLabel(matchManager.PodiumWinnerTeam).ToUpperInvariant()} PODIUM"
+                        : "DRAW SHOWCASE";
+                }
+
+                if (_hudCountdownValueText != null)
+                {
+                    _hudCountdownValueText.text = $"{podiumSeconds}s";
                 }
             }
         }
@@ -1823,6 +2003,15 @@ namespace RetrowaveRocket
 
             builder.Append("</mspace>");
             return builder.ToString();
+        }
+
+        private static string BuildFinalScoreSummary(RetrowaveMatchManager matchManager)
+        {
+            var winner = matchManager.BlueScore == matchManager.PinkScore
+                ? "Draw"
+                : (matchManager.BlueScore > matchManager.PinkScore ? "Blue wins" : "Pink wins");
+
+            return $"{winner}\nBlue {matchManager.BlueScore}  -  {matchManager.PinkScore} Pink\nRounds played: {matchManager.RoundCount}\n\nPlayers can change teams now. The host controls the next game.";
         }
 
         private void ResetHudInfoIntroState()
@@ -2010,6 +2199,114 @@ namespace RetrowaveRocket
             var width = Mathf.Max(0f, barRect.rect.width);
             var xPosition = Mathf.Clamp01(normalized) * width;
             markerRect.anchoredPosition = new Vector2(xPosition, 0f);
+        }
+
+        private void EnsurePodiumPresentation(RetrowaveMatchManager matchManager)
+        {
+            if (_podiumPresentationRoot == null)
+            {
+                BuildPodiumPresentation(matchManager);
+            }
+
+            if (!_podiumCameraActive)
+            {
+                RetrowaveCameraRig.ShowPodium();
+                _podiumCameraActive = true;
+            }
+        }
+
+        private void BuildPodiumPresentation(RetrowaveMatchManager matchManager)
+        {
+            ClearPodiumPresentation();
+
+            _podiumPresentationRoot = new GameObject("Retrowave Winners Podium");
+            _podiumPresentationRoot.transform.SetParent(transform, false);
+
+            var hasWinner = matchManager != null && matchManager.HasPodiumWinner;
+            var team = hasWinner ? matchManager.PodiumWinnerTeam : RetrowaveTeam.Blue;
+            var glowColor = hasWinner ? RetrowaveStyle.GetTeamGlow(team) : new Color(0.82f, 0.64f, 1f, 1f);
+            var baseColor = hasWinner ? RetrowaveStyle.GetTeamBase(team) : new Color(0.24f, 0.16f, 0.4f, 1f);
+            var podiumMaterial = RetrowaveStyle.CreateLitMaterial(baseColor, glowColor * 2.2f, 0.86f, 0.04f);
+            var trimMaterial = RetrowaveStyle.CreateUnlitMaterial(Color.Lerp(glowColor, Color.white, 0.18f));
+
+            var stage = CreatePodiumPrimitive(
+                "Podium Stage",
+                RetrowavePodiumLayout.Center + new Vector3(0f, 0.08f, 2.4f),
+                new Vector3(24f, 0.16f, 15f),
+                RetrowaveStyle.CreateLitMaterial(new Color(0.03f, 0.05f, 0.11f), glowColor * 0.8f, 0.82f, 0.02f));
+            stage.transform.SetParent(_podiumPresentationRoot.transform, true);
+
+            for (var rank = 0; rank < 3; rank++)
+            {
+                var platform = CreatePodiumPrimitive(
+                    $"Rank {rank + 1} Platform",
+                    RetrowavePodiumLayout.GetPlatformPosition(rank),
+                    RetrowavePodiumLayout.GetPlatformScale(rank),
+                    podiumMaterial);
+                platform.transform.SetParent(_podiumPresentationRoot.transform, true);
+
+                var trim = CreatePodiumPrimitive(
+                    $"Rank {rank + 1} Neon Trim",
+                    RetrowavePodiumLayout.GetPlatformPosition(rank) + new Vector3(0f, RetrowavePodiumLayout.GetPlatformScale(rank).y * 0.5f + 0.04f, -2.08f),
+                    new Vector3(RetrowavePodiumLayout.GetPlatformScale(rank).x + 0.18f, 0.08f, 0.12f),
+                    trimMaterial);
+                trim.transform.SetParent(_podiumPresentationRoot.transform, true);
+            }
+
+            var titleObject = new GameObject("Podium Title", typeof(TextMeshPro));
+            titleObject.transform.SetParent(_podiumPresentationRoot.transform, false);
+            titleObject.transform.position = RetrowavePodiumLayout.Center + new Vector3(0f, 6.2f, 5.9f);
+            titleObject.transform.rotation = Quaternion.LookRotation(Vector3.back, Vector3.up);
+
+            var titleText = titleObject.GetComponent<TextMeshPro>();
+            titleText.font = TMP_Settings.defaultFontAsset;
+            titleText.fontSize = 2.2f;
+            titleText.fontStyle = FontStyles.Bold;
+            titleText.alignment = TextAlignmentOptions.Center;
+            titleText.text = hasWinner ? $"{GetTeamLabel(team).ToUpperInvariant()} WINS" : "DRAW SHOWCASE";
+            titleText.color = Color.Lerp(glowColor, Color.white, 0.18f);
+
+            var lightObject = new GameObject("Podium Glow");
+            lightObject.transform.SetParent(_podiumPresentationRoot.transform, false);
+            lightObject.transform.position = RetrowavePodiumLayout.Center + new Vector3(0f, 5.5f, -1f);
+            var light = lightObject.AddComponent<Light>();
+            light.type = LightType.Point;
+            light.color = glowColor;
+            light.range = 34f;
+            light.intensity = 9f;
+        }
+
+        private static GameObject CreatePodiumPrimitive(string name, Vector3 position, Vector3 scale, Material material)
+        {
+            var primitive = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            primitive.name = name;
+            primitive.transform.SetPositionAndRotation(position, Quaternion.identity);
+            primitive.transform.localScale = scale;
+
+            if (primitive.TryGetComponent<Collider>(out var collider))
+            {
+                collider.enabled = false;
+            }
+
+            if (primitive.TryGetComponent<MeshRenderer>(out var renderer))
+            {
+                renderer.sharedMaterial = material;
+            }
+
+            return primitive;
+        }
+
+        private void ClearPodiumPresentation()
+        {
+            _podiumCameraActive = false;
+
+            if (_podiumPresentationRoot == null)
+            {
+                return;
+            }
+
+            Destroy(_podiumPresentationRoot);
+            _podiumPresentationRoot = null;
         }
 
         private void SelectGameplayRole(RetrowaveLobbyRole role)
@@ -2433,13 +2730,18 @@ namespace RetrowaveRocket
         private bool ShouldBlockGameplayInput()
         {
             var matchManager = GetActiveMatchManager();
-            var celebrationActive = _goalCelebrationVisible
-                                    || (matchManager != null && matchManager.IsGoalCelebrationActive);
+            var gameplayLocked = _goalCelebrationVisible
+                                 || (matchManager != null && matchManager.IsGameplayLocked);
 
             return _networkManager != null
                    && _networkManager.IsListening
                    && IsGameplayScene(SceneManager.GetActiveScene())
-                   && (_showPauseMenu || RequiresRoleSelection() || celebrationActive);
+                   && (_showPauseMenu || RequiresRoleSelection() || gameplayLocked);
+        }
+
+        private static string GetTeamLabel(RetrowaveTeam team)
+        {
+            return team == RetrowaveTeam.Blue ? "Blue Team" : "Pink Team";
         }
 
         private static string GetRoleLabel(RetrowaveLobbyEntry entry)
@@ -2584,6 +2886,7 @@ namespace RetrowaveRocket
             _showPauseMenu = false;
             _showScoreboard = false;
             ClearGoalCelebrationState();
+            ClearPodiumPresentation();
             ApplyScenePresentation(scene);
         }
 
@@ -2706,22 +3009,37 @@ namespace RetrowaveRocket
 
         private void ForceShutdownSession(bool rebuildRuntime, bool stopCoroutines)
         {
-            if (stopCoroutines)
+            if (_sessionShutdownInProgress)
             {
-                StopAllCoroutines();
+                return;
             }
 
-            _pendingConnectionMode = PendingConnectionMode.None;
-            _showPauseMenu = false;
-            _showScoreboard = false;
-            ClearGoalCelebrationState();
-            TearDownNetworkRuntime();
-            RetrowavePlayerController.ClearLocalOwner();
-            RetrowaveCameraRig.ShowOverview();
+            _sessionShutdownInProgress = true;
 
-            if (rebuildRuntime)
+            try
             {
-                EnsureNetworkRuntime();
+                if (stopCoroutines)
+                {
+                    StopAllCoroutines();
+                }
+
+                _pendingConnectionMode = PendingConnectionMode.None;
+                _showPauseMenu = false;
+                _showScoreboard = false;
+                ClearGoalCelebrationState();
+                ClearPodiumPresentation();
+                TearDownNetworkRuntime();
+                RetrowavePlayerController.ClearLocalOwner();
+                RetrowaveCameraRig.ShowOverview();
+
+                if (rebuildRuntime)
+                {
+                    EnsureNetworkRuntime();
+                }
+            }
+            finally
+            {
+                _sessionShutdownInProgress = false;
             }
         }
 
@@ -2731,6 +3049,7 @@ namespace RetrowaveRocket
             {
                 _networkManager.OnServerStarted -= HandleServerStarted;
                 _networkManager.OnClientConnectedCallback -= HandleNetworkClientConnected;
+                _networkManager.OnClientDisconnectCallback -= HandleNetworkClientDisconnected;
 
                 if (_networkManager.IsListening)
                 {
@@ -2769,6 +3088,7 @@ namespace RetrowaveRocket
             }
 
             RetrowaveArenaBuilder.SetActive(false);
+            ClearPodiumPresentation();
             DestroyGameplayMenuOverlay();
             DestroyGameplayHudOverlay();
         }

@@ -111,7 +111,7 @@ namespace RetrowaveRocket
                 return RetrowaveMusicContext.GoalScored;
             }
 
-            if (matchManager == null || matchManager.IsWarmup)
+            if (matchManager == null || matchManager.IsWarmup || matchManager.IsPodium || matchManager.IsMatchComplete)
             {
                 return RetrowaveMusicContext.WarmupLobby;
             }
