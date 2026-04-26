@@ -85,7 +85,7 @@ namespace RetrowaveRocket
         private RetrowaveTeam _goalCelebrationTeam;
         private string _goalCelebrationScorer = string.Empty;
         private int _goalCelebrationBlueScore;
-        private int _goalCelebrationOrangeScore;
+        private int _goalCelebrationPinkScore;
         private GameObject _gameplayMenuRoot;
         private GameObject _gameplayMenuEventSystem;
         private TMP_FontAsset _gameplayMenuFont;
@@ -94,7 +94,7 @@ namespace RetrowaveRocket
         private TMP_Text _gameplayMenuHintText;
         private TMP_Text _gameplayMenuFooterText;
         private Button _gameplayBlueButton;
-        private Button _gameplayOrangeButton;
+        private Button _gameplayPinkButton;
         private Button _gameplaySpectateButton;
         private Button _gameplayResumeButton;
         private Button _gameplayStartButton;
@@ -110,7 +110,7 @@ namespace RetrowaveRocket
         private TMP_Text _hudScoreStateText;
         private TMP_Text _hudScoreClockText;
         private TMP_Text _hudBlueScoreText;
-        private TMP_Text _hudOrangeScoreText;
+        private TMP_Text _hudPinkScoreText;
         private TMP_Text _hudInfoToggleText;
         private TMP_Text _hudInfoConnectionText;
         private TMP_Text _hudInfoPhaseText;
@@ -131,11 +131,14 @@ namespace RetrowaveRocket
         private TMP_Text _hudScoreboardTitleText;
         private TMP_Text _hudScoreboardSummaryText;
         private TMP_Text _hudScoreboardBlueText;
-        private TMP_Text _hudScoreboardOrangeText;
+        private TMP_Text _hudScoreboardPinkText;
         private TMP_Text _hudScoreboardSpectatorText;
         private TMP_Text _hudGoalHeadlineText;
         private TMP_Text _hudGoalScoreText;
         private TMP_Text _hudGoalDetailText;
+        private bool _gameplayHudSessionVisible;
+        private bool _hudInfoIntroAutoHidePending;
+        private float _hudInfoIntroHideAtRealtime;
         private float _serverSessionReconcileTimer;
         private RetrowaveMatchSettings _currentMatchSettings = RetrowaveMatchSettings.Default;
 
@@ -220,6 +223,7 @@ namespace RetrowaveRocket
                 {
                     _gameplayHudRoot.SetActive(false);
                 }
+                ResetHudInfoIntroState();
                 return;
             }
 
@@ -233,6 +237,7 @@ namespace RetrowaveRocket
                 {
                     _gameplayHudRoot.SetActive(false);
                 }
+                ResetHudInfoIntroState();
                 return;
             }
 
@@ -247,6 +252,7 @@ namespace RetrowaveRocket
                 if (keyboard.hKey.wasPressedThisFrame)
                 {
                     _showHudInfoPanel = !_showHudInfoPanel;
+                    _hudInfoIntroAutoHidePending = false;
                 }
 
                 if (keyboard.escapeKey.wasPressedThisFrame && !RequiresRoleSelection())
@@ -289,9 +295,9 @@ namespace RetrowaveRocket
                 return;
             }
 
-            if (keyboard.digit2Key.wasPressedThisFrame || keyboard.numpad2Key.wasPressedThisFrame || keyboard.oKey.wasPressedThisFrame)
+            if (keyboard.digit2Key.wasPressedThisFrame || keyboard.numpad2Key.wasPressedThisFrame || keyboard.pKey.wasPressedThisFrame)
             {
-                TryRequestRoleSelection(RetrowaveLobbyRole.Orange);
+                TryRequestRoleSelection(RetrowaveLobbyRole.Pink);
                 _showPauseMenu = false;
                 return;
             }
@@ -398,15 +404,15 @@ namespace RetrowaveRocket
             }
         }
 
-        public void BeginGoalCelebration(RetrowaveTeam scoringTeam, string scorerName, int blueScore, int orangeScore, float durationSeconds)
+        public void BeginGoalCelebration(RetrowaveTeam scoringTeam, string scorerName, int blueScore, int pinkScore, float durationSeconds)
         {
             _goalCelebrationVisible = true;
             _goalCelebrationTeam = scoringTeam;
             _goalCelebrationScorer = string.IsNullOrWhiteSpace(scorerName)
-                ? (scoringTeam == RetrowaveTeam.Blue ? "Blue Team" : "Orange Team")
+                ? (scoringTeam == RetrowaveTeam.Blue ? "Blue Team" : "Pink Team")
                 : scorerName;
             _goalCelebrationBlueScore = blueScore;
-            _goalCelebrationOrangeScore = orangeScore;
+            _goalCelebrationPinkScore = pinkScore;
             _goalCelebrationEndsAtRealtime = Time.unscaledTime + Mathf.Max(0.25f, durationSeconds);
             SetLocalTimeScale(0.2f);
         }
@@ -650,10 +656,10 @@ namespace RetrowaveRocket
             if (matchManager != null)
             {
                 var phaseLabel = matchManager.IsWarmup ? "Warmup / Practice" : "Live Match";
-                GUILayout.Label($"{phaseLabel}    Blue {matchManager.BlueScore} : {matchManager.OrangeScore} Orange");
+                GUILayout.Label($"{phaseLabel}    Blue {matchManager.BlueScore} : {matchManager.PinkScore} Pink");
                 GUILayout.Label(matchManager.IsWarmup
-                    ? $"Round timer preset: {FormatRoundDuration(matchManager.RoundDurationSeconds)}    Max players: {matchManager.MaxPlayers}"
-                    : $"Round {Mathf.Max(1, matchManager.CurrentRoundNumber)}    {FormatRoundClock(matchManager.RoundTimeRemaining)} remaining");
+                    ? $"Round timer preset: {FormatRoundDuration(matchManager.RoundDurationSeconds)} x {matchManager.RoundCount}    Max players: {matchManager.MaxPlayers}"
+                    : $"Round {Mathf.Max(1, matchManager.CurrentRoundNumber)}/{matchManager.RoundCount}    {FormatRoundClock(matchManager.RoundTimeRemaining)} remaining");
 
                 if (TryGetLocalLobbyEntry(out var entry))
                 {
@@ -671,7 +677,7 @@ namespace RetrowaveRocket
                     {
                         GUILayout.Label(matchManager.CanStartMatch
                             ? "Both teams are ready. Open Esc to start the match."
-                            : "Warm up now. Match start unlocks once blue and orange both have a player.");
+                            : "Warm up now. Match start unlocks once blue and pink both have a player.");
                     }
                 }
             }
@@ -757,7 +763,7 @@ namespace RetrowaveRocket
             _gameplayMenuFooterText = CreateMenuText(panel.transform, "Footer", 15, FontStyles.Normal, new Vector2(0f, -202f), new Vector2(590f, 52f), new Color(0.92f, 0.88f, 0.96f, 0.95f));
 
             _gameplayBlueButton = CreateMenuButton(panel.transform, "BlueButton", "Join Blue Team", new Vector2(0f, 48f), new Color(0.07f, 0.44f, 0.93f, 1f), () => SelectGameplayRole(RetrowaveLobbyRole.Blue));
-            _gameplayOrangeButton = CreateMenuButton(panel.transform, "OrangeButton", "Join Orange Team", new Vector2(0f, -20f), new Color(1f, 0.36f, 0.18f, 1f), () => SelectGameplayRole(RetrowaveLobbyRole.Orange));
+            _gameplayPinkButton = CreateMenuButton(panel.transform, "PinkButton", "Join Pink Team", new Vector2(0f, -20f), RetrowaveStyle.PinkBase, () => SelectGameplayRole(RetrowaveLobbyRole.Pink));
             _gameplaySpectateButton = CreateMenuButton(panel.transform, "SpectateButton", "Spectate", new Vector2(0f, -88f), new Color(0.34f, 0.18f, 0.46f, 1f), () => SelectGameplayRole(RetrowaveLobbyRole.Spectator));
             _gameplayStartButton = CreateMenuButton(panel.transform, "StartButton", "Start Match", new Vector2(0f, -164f), new Color(0.14f, 0.64f, 0.42f, 1f), HandleGameplayStartMatch);
             _gameplayStartButtonLabel = _gameplayStartButton.GetComponentInChildren<TextMeshProUGUI>(true);
@@ -786,7 +792,7 @@ namespace RetrowaveRocket
             _gameplayMenuHintText = null;
             _gameplayMenuFooterText = null;
             _gameplayBlueButton = null;
-            _gameplayOrangeButton = null;
+            _gameplayPinkButton = null;
             _gameplaySpectateButton = null;
             _gameplayResumeButton = null;
             _gameplayStartButton = null;
@@ -856,10 +862,10 @@ namespace RetrowaveRocket
             {
                 _gameplayMenuTitleText.text = forceSelection ? "Choose Your Role" : "Match Menu";
                 _gameplayMenuBodyText.text = forceSelection
-                    ? "Pick blue, orange, or spectator before jumping fully into the lobby."
+                    ? "Pick blue, pink, or spectator before jumping fully into the lobby."
                     : "Swap teams, spectate, or control the match flow from here.";
                 _gameplayMenuHintText.text = forceSelection
-                    ? "Keyboard also works: 1 / B = Blue, 2 / O = Orange, 3 / S = Spectator"
+                    ? "Keyboard also works: 1 / B = Blue, 2 / P = Pink, 3 / S = Spectator"
                     : "Esc closes this menu after you've chosen a role.";
             }
 
@@ -885,7 +891,7 @@ namespace RetrowaveRocket
             _gameplayStartButton.interactable = hostCanStart;
             var canSubmitRoleSelection = !sessionBootstrapPending && (RetrowavePlayerController.LocalPlayer != null || matchManager != null);
             _gameplayBlueButton.interactable = canSubmitRoleSelection;
-            _gameplayOrangeButton.interactable = canSubmitRoleSelection;
+            _gameplayPinkButton.interactable = canSubmitRoleSelection;
             _gameplaySpectateButton.interactable = canSubmitRoleSelection;
 
             if (sessionBootstrapPending)
@@ -902,7 +908,7 @@ namespace RetrowaveRocket
             }
             else if (hostIsPresent && !hostCanStart && matchManager != null)
             {
-                _gameplayMenuFooterText.text = "Host start unlocks once at least one player is on blue and orange.";
+                _gameplayMenuFooterText.text = "Host start unlocks once at least one player is on blue and pink.";
             }
             else
             {
@@ -1008,9 +1014,9 @@ namespace RetrowaveRocket
                 new Vector2(220f, 50f),
                 Color.white);
 
-            _hudOrangeScoreText = CreateHudText(
+            _hudPinkScoreText = CreateHudText(
                 scoreStrip.transform,
-                "OrangeScore",
+                "PinkScore",
                 "0",
                 40f,
                 FontStyles.Bold,
@@ -1020,7 +1026,7 @@ namespace RetrowaveRocket
                 new Vector2(0.5f, 0.5f),
                 new Vector2(176f, -6f),
                 new Vector2(110f, 56f),
-                RetrowaveStyle.OrangeBase);
+                RetrowaveStyle.PinkBase);
 
             _gameplayHudInfoRoot = CreateHudPanel(
                 _gameplayHudRoot.transform,
@@ -1306,13 +1312,13 @@ namespace RetrowaveRocket
                 "BLUE TEAM",
                 RetrowaveStyle.BlueGlow);
 
-            _hudScoreboardOrangeText = CreateScoreboardSection(
+            _hudScoreboardPinkText = CreateScoreboardSection(
                 _gameplayHudScoreboardRoot.transform,
-                "OrangeSection",
+                "PinkSection",
                 new Vector2(0f, -118f),
                 new Vector2(392f, 452f),
-                "ORANGE TEAM",
-                RetrowaveStyle.OrangeBase);
+                "PINK TEAM",
+                RetrowaveStyle.PinkBase);
 
             _hudScoreboardSpectatorText = CreateScoreboardSection(
                 _gameplayHudScoreboardRoot.transform,
@@ -1395,7 +1401,7 @@ namespace RetrowaveRocket
             _hudScoreStateText = null;
             _hudScoreClockText = null;
             _hudBlueScoreText = null;
-            _hudOrangeScoreText = null;
+            _hudPinkScoreText = null;
             _hudInfoToggleText = null;
             _hudInfoConnectionText = null;
             _hudInfoPhaseText = null;
@@ -1416,7 +1422,7 @@ namespace RetrowaveRocket
             _hudScoreboardTitleText = null;
             _hudScoreboardSummaryText = null;
             _hudScoreboardBlueText = null;
-            _hudScoreboardOrangeText = null;
+            _hudScoreboardPinkText = null;
             _hudScoreboardSpectatorText = null;
             _hudGoalHeadlineText = null;
             _hudGoalScoreText = null;
@@ -1437,7 +1443,22 @@ namespace RetrowaveRocket
 
             if (!isVisible)
             {
+                ResetHudInfoIntroState();
                 return;
+            }
+
+            if (!_gameplayHudSessionVisible)
+            {
+                _gameplayHudSessionVisible = true;
+                _showHudInfoPanel = true;
+                _hudInfoIntroAutoHidePending = true;
+                _hudInfoIntroHideAtRealtime = Time.unscaledTime + 5f;
+            }
+
+            if (_hudInfoIntroAutoHidePending && Time.unscaledTime >= _hudInfoIntroHideAtRealtime)
+            {
+                _hudInfoIntroAutoHidePending = false;
+                _showHudInfoPanel = false;
             }
 
             var matchManager = GetActiveMatchManager();
@@ -1474,13 +1495,15 @@ namespace RetrowaveRocket
             {
                 if (_hudScoreStateText != null)
                 {
-                    _hudScoreStateText.text = matchManager.IsWarmup ? "WARMUP LOBBY" : $"ROUND {Mathf.Max(1, matchManager.CurrentRoundNumber)}";
+                    _hudScoreStateText.text = matchManager.IsWarmup
+                        ? "WARMUP LOBBY"
+                        : $"ROUND {Mathf.Max(1, matchManager.CurrentRoundNumber)}/{matchManager.RoundCount}";
                 }
 
                 if (_hudScoreClockText != null)
                 {
                     _hudScoreClockText.text = matchManager.IsWarmup
-                        ? FormatRoundDuration(matchManager.RoundDurationSeconds)
+                        ? $"{FormatRoundDuration(matchManager.RoundDurationSeconds)} x {matchManager.RoundCount}"
                         : FormatRoundClock(matchManager.RoundTimeRemaining);
                 }
 
@@ -1489,16 +1512,16 @@ namespace RetrowaveRocket
                     _hudBlueScoreText.text = matchManager.BlueScore.ToString();
                 }
 
-                if (_hudOrangeScoreText != null)
+                if (_hudPinkScoreText != null)
                 {
-                    _hudOrangeScoreText.text = matchManager.OrangeScore.ToString();
+                    _hudPinkScoreText.text = matchManager.PinkScore.ToString();
                 }
 
                 if (_hudInfoPhaseText != null)
                 {
                     _hudInfoPhaseText.text = matchManager.IsWarmup
-                        ? $"Warmup live. Max players {matchManager.MaxPlayers}."
-                        : $"Live match. {FormatRoundClock(matchManager.RoundTimeRemaining)} left in round {Mathf.Max(1, matchManager.CurrentRoundNumber)}.";
+                        ? $"Warmup live. {FormatRoundDuration(matchManager.RoundDurationSeconds)} x {matchManager.RoundCount} rounds = {FormatRoundDuration(matchManager.RoundDurationSeconds * matchManager.RoundCount)} match. Max players {matchManager.MaxPlayers}."
+                        : $"Live match. {FormatRoundClock(matchManager.RoundTimeRemaining)} left in round {Mathf.Max(1, matchManager.CurrentRoundNumber)}/{matchManager.RoundCount}.";
                 }
             }
             else
@@ -1518,9 +1541,9 @@ namespace RetrowaveRocket
                     _hudBlueScoreText.text = "-";
                 }
 
-                if (_hudOrangeScoreText != null)
+                if (_hudPinkScoreText != null)
                 {
-                    _hudOrangeScoreText.text = "-";
+                    _hudPinkScoreText.text = "-";
                 }
 
                 if (_hudInfoPhaseText != null)
@@ -1537,7 +1560,7 @@ namespace RetrowaveRocket
 
                     if (!entry.HasSelectedRole)
                     {
-                        roleLine += "\nChoose blue, orange, or spectator to enter the lobby.";
+                        roleLine += "\nChoose blue, pink, or spectator to enter the lobby.";
                     }
                     else if (entry.QueuedForNextRound)
                     {
@@ -1547,7 +1570,7 @@ namespace RetrowaveRocket
                     {
                         roleLine += matchManager.CanStartMatch
                             ? "\nBoth teams are ready. Open Esc to start."
-                            : "\nMatch start unlocks once blue and orange both have a player.";
+                            : "\nMatch start unlocks once blue and pink both have a player.";
                     }
 
                     _hudInfoRoleText.text = roleLine;
@@ -1661,14 +1684,14 @@ namespace RetrowaveRocket
                 {
                     _hudScoreboardTitleText.text = matchManager.IsWarmup
                         ? "Lobby Scoreboard"
-                        : $"Live Scoreboard  •  Blue {matchManager.BlueScore} : {matchManager.OrangeScore} Orange";
+                        : $"Live Scoreboard  •  Blue {matchManager.BlueScore} : {matchManager.PinkScore} Pink";
                 }
 
                 if (_hudScoreboardSummaryText != null)
                 {
                     _hudScoreboardSummaryText.text = matchManager.IsWarmup
-                        ? $"Warmup open  •  Round timer {FormatRoundDuration(matchManager.RoundDurationSeconds)}  •  Max players {matchManager.MaxPlayers}"
-                        : $"Round {Mathf.Max(1, matchManager.CurrentRoundNumber)}  •  {FormatRoundClock(matchManager.RoundTimeRemaining)} remaining  •  Hold Tab to view";
+                        ? $"Warmup open  •  {FormatRoundDuration(matchManager.RoundDurationSeconds)} x {matchManager.RoundCount} rounds = {FormatRoundDuration(matchManager.RoundDurationSeconds * matchManager.RoundCount)}  •  Max players {matchManager.MaxPlayers}"
+                        : $"Round {Mathf.Max(1, matchManager.CurrentRoundNumber)}/{matchManager.RoundCount}  •  {FormatRoundClock(matchManager.RoundTimeRemaining)} remaining  •  Hold Tab to view";
                 }
 
                 if (_hudScoreboardBlueText != null)
@@ -1676,9 +1699,9 @@ namespace RetrowaveRocket
                     _hudScoreboardBlueText.text = BuildScoreboardSectionText(RetrowaveLobbyRole.Blue, matchManager);
                 }
 
-                if (_hudScoreboardOrangeText != null)
+                if (_hudScoreboardPinkText != null)
                 {
-                    _hudScoreboardOrangeText.text = BuildScoreboardSectionText(RetrowaveLobbyRole.Orange, matchManager);
+                    _hudScoreboardPinkText.text = BuildScoreboardSectionText(RetrowaveLobbyRole.Pink, matchManager);
                 }
 
                 if (_hudScoreboardSpectatorText != null)
@@ -1696,8 +1719,8 @@ namespace RetrowaveRocket
             {
                 var teamColor = _goalCelebrationTeam == RetrowaveTeam.Blue
                     ? RetrowaveStyle.BlueGlow
-                    : RetrowaveStyle.OrangeBase;
-                var teamLabel = _goalCelebrationTeam == RetrowaveTeam.Blue ? "BLUE TEAM" : "ORANGE TEAM";
+                    : RetrowaveStyle.PinkBase;
+                var teamLabel = _goalCelebrationTeam == RetrowaveTeam.Blue ? "BLUE TEAM" : "PINK TEAM";
 
                 if (_hudGoalHeadlineText != null)
                 {
@@ -1707,7 +1730,7 @@ namespace RetrowaveRocket
 
                 if (_hudGoalScoreText != null)
                 {
-                    _hudGoalScoreText.text = $"Blue {_goalCelebrationBlueScore}  -  {_goalCelebrationOrangeScore} Orange";
+                    _hudGoalScoreText.text = $"Blue {_goalCelebrationBlueScore}  -  {_goalCelebrationPinkScore} Pink";
                 }
 
                 if (_hudGoalDetailText != null)
@@ -1800,6 +1823,13 @@ namespace RetrowaveRocket
 
             builder.Append("</mspace>");
             return builder.ToString();
+        }
+
+        private void ResetHudInfoIntroState()
+        {
+            _gameplayHudSessionVisible = false;
+            _hudInfoIntroAutoHidePending = false;
+            _hudInfoIntroHideAtRealtime = 0f;
         }
 
         private static string FormatScoreboardName(string playerLabel)
@@ -2087,13 +2117,13 @@ namespace RetrowaveRocket
             var boxRect = new Rect(Screen.width * 0.5f - boxWidth * 0.5f, 56f, boxWidth, boxHeight);
             var teamColor = _goalCelebrationTeam == RetrowaveTeam.Blue
                 ? RetrowaveStyle.BlueGlow
-                : RetrowaveStyle.OrangeBase;
-            var teamLabel = _goalCelebrationTeam == RetrowaveTeam.Blue ? "Blue Team" : "Orange Team";
+                : RetrowaveStyle.PinkBase;
+            var teamLabel = _goalCelebrationTeam == RetrowaveTeam.Blue ? "Blue Team" : "Pink Team";
             var headline = $"{teamLabel.ToUpperInvariant()} SCORES!";
             var scorerLine = _goalCelebrationScorer == teamLabel
                 ? $"{teamLabel} scored the goal"
                 : $"{_goalCelebrationScorer} scored for {teamLabel}";
-            var scoreLine = $"Blue {_goalCelebrationBlueScore}  -  {_goalCelebrationOrangeScore} Orange";
+            var scoreLine = $"Blue {_goalCelebrationBlueScore}  -  {_goalCelebrationPinkScore} Pink";
 
             var previousColor = GUI.color;
             GUI.color = new Color(0.04f, 0.03f, 0.08f, 0.96f);
@@ -2140,8 +2170,8 @@ namespace RetrowaveRocket
 
             if (forceSelection)
             {
-                GUILayout.Label("Pick blue, orange, or spectator before jumping fully into the lobby.");
-                GUILayout.Label("Shortcuts: 1 or B = Blue, 2 or O = Orange, 3 or S = Spectator");
+                GUILayout.Label("Pick blue, pink, or spectator before jumping fully into the lobby.");
+                GUILayout.Label("Shortcuts: 1 or B = Blue, 2 or P = Pink, 3 or S = Spectator");
             }
             else
             {
@@ -2151,7 +2181,7 @@ namespace RetrowaveRocket
             GUILayout.Space(10f);
 
             DrawRoleButton("Join Blue Team", RetrowaveLobbyRole.Blue);
-            DrawRoleButton("Join Orange Team", RetrowaveLobbyRole.Orange);
+            DrawRoleButton("Join Pink Team", RetrowaveLobbyRole.Pink);
             DrawRoleButton("Spectate", RetrowaveLobbyRole.Spectator);
 
             if (matchManager != null && TryGetLocalLobbyEntry(out var entry) && entry.IsHost)
@@ -2170,7 +2200,7 @@ namespace RetrowaveRocket
 
                 if (!matchManager.CanStartMatch)
                 {
-                    GUILayout.Label("Host start unlocks once at least one player is on blue and orange.");
+                    GUILayout.Label("Host start unlocks once at least one player is on blue and pink.");
                 }
             }
 
@@ -2212,10 +2242,10 @@ namespace RetrowaveRocket
             GUILayout.BeginArea(new Rect(Screen.width * 0.5f - 330f, 18f, 660f, 420f), GUI.skin.box);
             GUILayout.Label(matchManager.IsWarmup
                 ? "Lobby Scoreboard - Warmup"
-                : $"Live Scoreboard - Blue {matchManager.BlueScore} : {matchManager.OrangeScore} Orange");
+                : $"Live Scoreboard - Blue {matchManager.BlueScore} : {matchManager.PinkScore} Pink");
 
             DrawScoreboardSection("Blue Team", RetrowaveLobbyRole.Blue, matchManager);
-            DrawScoreboardSection("Orange Team", RetrowaveLobbyRole.Orange, matchManager);
+            DrawScoreboardSection("Pink Team", RetrowaveLobbyRole.Pink, matchManager);
             DrawScoreboardSection("Spectators", RetrowaveLobbyRole.Spectator, matchManager, includeUnselected: true);
 
             GUILayout.EndArea();
@@ -2433,7 +2463,7 @@ namespace RetrowaveRocket
             return role switch
             {
                 RetrowaveLobbyRole.Blue => "Blue Team",
-                RetrowaveLobbyRole.Orange => "Orange Team",
+                RetrowaveLobbyRole.Pink => "Pink Team",
                 _ => "Spectator",
             };
         }

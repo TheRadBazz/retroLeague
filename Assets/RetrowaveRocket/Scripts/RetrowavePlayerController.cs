@@ -310,7 +310,7 @@ namespace RetrowaveRocket
         [ServerRpc]
         private void SubmitRoleSelectionServerRpc(int roleValue)
         {
-            var clampedRole = (RetrowaveLobbyRole)Mathf.Clamp(roleValue, (int)RetrowaveLobbyRole.Spectator, (int)RetrowaveLobbyRole.Orange);
+            var clampedRole = (RetrowaveLobbyRole)Mathf.Clamp(roleValue, (int)RetrowaveLobbyRole.Spectator, (int)RetrowaveLobbyRole.Pink);
             RetrowaveMatchManager.Instance?.HandlePlayerRoleSelection(OwnerClientId, clampedRole);
         }
 
@@ -327,7 +327,7 @@ namespace RetrowaveRocket
                 return;
             }
 
-            _lobbyRoleValue.Value = team == RetrowaveTeam.Blue ? (int)RetrowaveLobbyRole.Blue : (int)RetrowaveLobbyRole.Orange;
+            _lobbyRoleValue.Value = team == RetrowaveTeam.Blue ? (int)RetrowaveLobbyRole.Blue : (int)RetrowaveLobbyRole.Pink;
             _hasSelectedRole.Value = true;
             _teamValue.Value = (int)team;
             _rigidbody.isKinematic = false;

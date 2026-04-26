@@ -20,7 +20,8 @@ namespace RetrowaveRocket
             Host = 1,
         }
 
-        private static readonly int[] RoundDurationOptions = { 180, 300, 420 };
+        private static readonly int[] RoundDurationOptions = { 60, 90, 120, 180, 240, 300, 420, 600, 900 };
+        private static readonly int[] RoundCountOptions = { 1, 2, 3, 5, 7, 9, 12 };
         private static readonly int[] MaxPlayerOptions = { 2, 4, 6, 8, 10, 12, 16, 20, 24, 28, 32, 36, 40 };
         private static readonly RetrowaveArenaSizePreset[] ArenaSizeOptions =
         {
@@ -43,6 +44,7 @@ namespace RetrowaveRocket
         private TMP_InputField _hostAddressField;
         private TMP_InputField _hostPortField;
         private TMP_Text _roundDurationValueText;
+        private TMP_Text _roundCountValueText;
         private TMP_Text _maxPlayersValueText;
         private TMP_Text _arenaSizeValueText;
         private TMP_Text _hostSummaryText;
@@ -61,7 +63,8 @@ namespace RetrowaveRocket
         private GameObject _joinPanel;
         private GameObject _hostPanel;
         private ConnectionTab _activeTab = ConnectionTab.Host;
-        private int _roundDurationIndex = 1;
+        private int _roundDurationIndex = 5;
+        private int _roundCountIndex = 2;
         private int _maxPlayersIndex = 1;
         private int _arenaSizeIndex = 0;
         private bool _syncingDisplayNameFields;
@@ -315,9 +318,10 @@ namespace RetrowaveRocket
             _hostPortField = CreateInputRow(parent, "Port", RetrowaveGameBootstrap.Instance != null ? RetrowaveGameBootstrap.Instance.DefaultPort : "7777", numeric: true);
 
             _roundDurationValueText = CreateSelectorRow(parent, "Round Time", () => StepRoundDuration(-1), () => StepRoundDuration(1));
+            _roundCountValueText = CreateSelectorRow(parent, "Rounds", () => StepRoundCount(-1), () => StepRoundCount(1));
             _maxPlayersValueText = CreateSelectorRow(parent, "Max Players", () => StepMaxPlayers(-1), () => StepMaxPlayers(1));
             _arenaSizeValueText = CreateSelectorRow(parent, "Arena Size", () => StepArenaSize(-1), () => StepArenaSize(1));
-            _hostSummaryText = CreatePanelText(parent, "HostSummary", string.Empty, 16f, new Color(0.59f, 0.86f, 1f, 1f), 52f);
+            _hostSummaryText = CreatePanelText(parent, "HostSummary", string.Empty, 16f, new Color(0.59f, 0.86f, 1f, 1f), 68f);
             BindDisplayNameField(_hostNameField, isHostField: true);
         }
 
@@ -344,6 +348,12 @@ namespace RetrowaveRocket
             UpdateHostSettingsSummary();
         }
 
+        private void StepRoundCount(int direction)
+        {
+            _roundCountIndex = WrapIndex(_roundCountIndex + direction, RoundCountOptions.Length);
+            UpdateHostSettingsSummary();
+        }
+
         private void StepMaxPlayers(int direction)
         {
             _maxPlayersIndex = WrapIndex(_maxPlayersIndex + direction, MaxPlayerOptions.Length);
@@ -358,27 +368,30 @@ namespace RetrowaveRocket
 
         private void UpdateHostSettingsSummary()
         {
-            if (_roundDurationValueText == null || _maxPlayersValueText == null || _arenaSizeValueText == null || _hostSummaryText == null)
+            if (_roundDurationValueText == null || _roundCountValueText == null || _maxPlayersValueText == null || _arenaSizeValueText == null || _hostSummaryText == null)
             {
                 return;
             }
 
             _roundDurationValueText.text = FormatRoundDuration(RoundDurationOptions[_roundDurationIndex]);
+            _roundCountValueText.text = $"{RoundCountOptions[_roundCountIndex]} rounds";
             _maxPlayersValueText.text = $"{MaxPlayerOptions[_maxPlayersIndex]} players";
             _arenaSizeValueText.text = GetArenaSizeLabel(ArenaSizeOptions[_arenaSizeIndex]);
 
             var resolvedLayout = RetrowaveArenaLayout.Resolve(BuildHostSettings());
             var effectivePreset = (RetrowaveArenaSizePreset)Mathf.Max((int)ArenaSizeOptions[_arenaSizeIndex], ResolveMinimumArenaPreset(MaxPlayerOptions[_maxPlayersIndex]));
+            var totalSeconds = RoundDurationOptions[_roundDurationIndex] * RoundCountOptions[_roundCountIndex];
             var sizeLead = ArenaSizeOptions[_arenaSizeIndex] == RetrowaveArenaSizePreset.Auto
                 ? $"Auto scale resolves to {GetArenaSizeLabel(effectivePreset).ToLowerInvariant()}"
                 : $"{GetArenaSizeLabel(effectivePreset)} size";
-            _hostSummaryText.text = $"{sizeLead} with {resolvedLayout.PowerUpPositions.Length} power-up lanes and room for {MaxPlayerOptions[_maxPlayersIndex]} active players.";
+            _hostSummaryText.text = $"{FormatRoundDuration(RoundDurationOptions[_roundDurationIndex])} x {RoundCountOptions[_roundCountIndex]} rounds = {FormatRoundDuration(totalSeconds)} match time. {sizeLead} with {resolvedLayout.PowerUpPositions.Length} power-up lanes.";
         }
 
         private RetrowaveMatchSettings BuildHostSettings()
         {
             return new RetrowaveMatchSettings(
                 RoundDurationOptions[_roundDurationIndex],
+                RoundCountOptions[_roundCountIndex],
                 MaxPlayerOptions[_maxPlayersIndex],
                 ArenaSizeOptions[_arenaSizeIndex]);
         }
@@ -417,7 +430,7 @@ namespace RetrowaveRocket
             {
                 _statusText.text = tab == ConnectionTab.Join
                     ? "Enter the host machine's address and port, then join the live lobby."
-                    : "Tune the round timer, player cap, and arena scale before spinning up the local host.";
+                    : "Tune round length, round count, player cap, and arena scale before spinning up the local host.";
             }
         }
 

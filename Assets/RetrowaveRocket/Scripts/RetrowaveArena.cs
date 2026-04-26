@@ -6,14 +6,14 @@ namespace RetrowaveRocket
     public enum RetrowaveTeam
     {
         Blue = 0,
-        Orange = 1,
+        Pink = 1,
     }
 
     public enum RetrowaveLobbyRole
     {
         Spectator = 0,
         Blue = 1,
-        Orange = 2,
+        Pink = 2,
     }
 
     public enum RetrowavePowerUpType
@@ -34,18 +34,20 @@ namespace RetrowaveRocket
 
     public readonly struct RetrowaveMatchSettings
     {
-        public RetrowaveMatchSettings(int roundDurationSeconds, int maxPlayers, RetrowaveArenaSizePreset arenaSizePreset)
+        public RetrowaveMatchSettings(int roundDurationSeconds, int roundCount, int maxPlayers, RetrowaveArenaSizePreset arenaSizePreset)
         {
             RoundDurationSeconds = Mathf.Clamp(roundDurationSeconds, 60, 900);
+            RoundCount = Mathf.Clamp(roundCount, 1, 12);
             MaxPlayers = Mathf.Clamp(maxPlayers, 2, 40);
             ArenaSizePreset = arenaSizePreset;
         }
 
         public int RoundDurationSeconds { get; }
+        public int RoundCount { get; }
         public int MaxPlayers { get; }
         public RetrowaveArenaSizePreset ArenaSizePreset { get; }
 
-        public static RetrowaveMatchSettings Default => new RetrowaveMatchSettings(300, 4, RetrowaveArenaSizePreset.Auto);
+        public static RetrowaveMatchSettings Default => new RetrowaveMatchSettings(300, 3, 4, RetrowaveArenaSizePreset.Auto);
     }
 
     public readonly struct RetrowaveArenaLayout
@@ -373,8 +375,8 @@ namespace RetrowaveRocket
 
         public static Color BlueBase => new Color(0.07f, 0.44f, 0.93f);
         public static Color BlueGlow => new Color(0.1f, 0.95f, 1f);
-        public static Color OrangeBase => new Color(1f, 0.36f, 0.18f);
-        public static Color OrangeGlow => new Color(1f, 0.24f, 0.75f);
+        public static Color PinkBase => new Color(1f, 0.22f, 0.72f);
+        public static Color PinkGlow => new Color(1f, 0.24f, 0.75f);
         public static Color ArenaBase => new Color(0.05f, 0.02f, 0.11f);
         public static Color ArenaGlow => new Color(0.06f, 0.78f, 1f);
 
@@ -430,12 +432,12 @@ namespace RetrowaveRocket
 
         public static Color GetTeamBase(RetrowaveTeam team)
         {
-            return team == RetrowaveTeam.Blue ? BlueBase : OrangeBase;
+            return team == RetrowaveTeam.Blue ? BlueBase : PinkBase;
         }
 
         public static Color GetTeamGlow(RetrowaveTeam team)
         {
-            return team == RetrowaveTeam.Blue ? BlueGlow : OrangeGlow;
+            return team == RetrowaveTeam.Blue ? BlueGlow : PinkGlow;
         }
 
         private static Material CreateMaterialInstance(ref Material template, ref Shader shaderCache, Shader resolvedShader)
@@ -693,7 +695,7 @@ namespace RetrowaveRocket
         private static void BuildGoals(Transform parent)
         {
             BuildGoal(parent, RetrowaveTeam.Blue, -1f);
-            BuildGoal(parent, RetrowaveTeam.Orange, 1f);
+            BuildGoal(parent, RetrowaveTeam.Pink, 1f);
         }
 
         private static void BuildArenaCage(Transform parent)
