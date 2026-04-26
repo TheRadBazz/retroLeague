@@ -244,7 +244,7 @@ namespace RetrowaveRocket
                 HandleSpectatorFollowHotkeys(keyboard);
                 _showScoreboard = keyboard.tabKey.isPressed;
 
-                if (keyboard.qKey.wasPressedThisFrame)
+                if (keyboard.hKey.wasPressedThisFrame)
                 {
                     _showHudInfoPanel = !_showHudInfoPanel;
                 }
@@ -1028,8 +1028,8 @@ namespace RetrowaveRocket
                 new Vector2(0f, 1f),
                 new Vector2(0f, 1f),
                 new Vector2(0f, 1f),
-                new Vector2(28f, -44f),
-                new Vector2(462f, 232f),
+                new Vector2(28f, -36f),
+                new Vector2(540f, 312f),
                 new Color(0.04f, 0.08f, 0.14f, 0.88f),
                 new Color(0.11f, 0.74f, 0.95f, 0.36f));
 
@@ -1037,21 +1037,21 @@ namespace RetrowaveRocket
                 _gameplayHudInfoRoot.transform,
                 "InfoHeader",
                 "MATCH STATUS",
-                20f,
+                22f,
                 FontStyles.Bold,
                 TextAlignmentOptions.Left,
                 new Vector2(0f, 1f),
                 new Vector2(0f, 1f),
                 new Vector2(0f, 1f),
                 new Vector2(22f, -16f),
-                new Vector2(240f, 30f),
+                new Vector2(270f, 34f),
                 Color.white);
 
             _hudInfoToggleText = CreateHudText(
                 _gameplayHudInfoRoot.transform,
                 "InfoToggle",
-                "Q HIDE",
-                15f,
+                "H HIDE",
+                16f,
                 FontStyles.Bold,
                 TextAlignmentOptions.Right,
                 new Vector2(1f, 1f),
@@ -1065,56 +1065,56 @@ namespace RetrowaveRocket
                 _gameplayHudInfoRoot.transform,
                 "Connection",
                 string.Empty,
-                17f,
+                18f,
                 FontStyles.Normal,
                 TextAlignmentOptions.TopLeft,
                 new Vector2(0f, 1f),
                 new Vector2(0f, 1f),
                 new Vector2(0f, 1f),
-                new Vector2(22f, -54f),
-                new Vector2(398f, 38f),
+                new Vector2(22f, -58f),
+                new Vector2(482f, 36f),
                 new Color(0.86f, 0.92f, 0.98f, 1f));
 
             _hudInfoPhaseText = CreateHudText(
                 _gameplayHudInfoRoot.transform,
                 "Phase",
                 string.Empty,
-                18f,
+                19f,
                 FontStyles.Bold,
                 TextAlignmentOptions.TopLeft,
                 new Vector2(0f, 1f),
                 new Vector2(0f, 1f),
                 new Vector2(0f, 1f),
-                new Vector2(22f, -92f),
-                new Vector2(398f, 42f),
+                new Vector2(22f, -104f),
+                new Vector2(482f, 48f),
                 Color.white);
 
             _hudInfoRoleText = CreateHudText(
                 _gameplayHudInfoRoot.transform,
                 "Role",
                 string.Empty,
-                17f,
+                18f,
                 FontStyles.Normal,
                 TextAlignmentOptions.TopLeft,
                 new Vector2(0f, 1f),
                 new Vector2(0f, 1f),
                 new Vector2(0f, 1f),
-                new Vector2(22f, -138f),
-                new Vector2(398f, 54f),
+                new Vector2(22f, -164f),
+                new Vector2(482f, 72f),
                 new Color(0.82f, 0.89f, 1f, 1f));
 
             _hudInfoHintText = CreateHudText(
                 _gameplayHudInfoRoot.transform,
                 "Hint",
                 string.Empty,
-                15f,
+                16f,
                 FontStyles.Normal,
                 TextAlignmentOptions.TopLeft,
-                new Vector2(0f, 0f),
-                new Vector2(0f, 0f),
-                new Vector2(0f, 0f),
-                new Vector2(22f, 18f),
-                new Vector2(398f, 58f),
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(22f, -250f),
+                new Vector2(482f, 50f),
                 new Color(0.58f, 0.86f, 1f, 0.95f));
 
             _gameplayHudInfoCollapsedRoot = CreateHudPanel(
@@ -1123,15 +1123,15 @@ namespace RetrowaveRocket
                 new Vector2(0f, 1f),
                 new Vector2(0f, 1f),
                 new Vector2(0f, 1f),
-                new Vector2(28f, -44f),
-                new Vector2(208f, 50f),
+                new Vector2(28f, -36f),
+                new Vector2(230f, 54f),
                 new Color(0.03f, 0.07f, 0.13f, 0.82f),
                 new Color(0.11f, 0.74f, 0.95f, 0.28f));
 
             _hudInfoCollapsedText = CreateHudText(
                 _gameplayHudInfoCollapsedRoot.transform,
                 "CollapsedText",
-                "Q show match info",
+                "H show match info",
                 16f,
                 FontStyles.Bold,
                 TextAlignmentOptions.Center,
@@ -1266,7 +1266,7 @@ namespace RetrowaveRocket
                 new Vector2(0.5f, 1f),
                 new Vector2(0.5f, 1f),
                 new Vector2(0f, -148f),
-                new Vector2(1180f, 620f),
+                new Vector2(1360f, 620f),
                 new Color(0.02f, 0.04f, 0.09f, 0.95f),
                 new Color(0.12f, 0.8f, 1f, 0.34f));
 
@@ -1301,8 +1301,8 @@ namespace RetrowaveRocket
             _hudScoreboardBlueText = CreateScoreboardSection(
                 _gameplayHudScoreboardRoot.transform,
                 "BlueSection",
-                new Vector2(-372f, -118f),
-                new Vector2(320f, 452f),
+                new Vector2(-430f, -118f),
+                new Vector2(392f, 452f),
                 "BLUE TEAM",
                 RetrowaveStyle.BlueGlow);
 
@@ -1310,15 +1310,15 @@ namespace RetrowaveRocket
                 _gameplayHudScoreboardRoot.transform,
                 "OrangeSection",
                 new Vector2(0f, -118f),
-                new Vector2(320f, 452f),
+                new Vector2(392f, 452f),
                 "ORANGE TEAM",
                 RetrowaveStyle.OrangeBase);
 
             _hudScoreboardSpectatorText = CreateScoreboardSection(
                 _gameplayHudScoreboardRoot.transform,
                 "SpectatorSection",
-                new Vector2(372f, -118f),
-                new Vector2(320f, 452f),
+                new Vector2(430f, -118f),
+                new Vector2(392f, 452f),
                 "SPECTATORS",
                 new Color(0.8f, 0.62f, 1f, 1f));
 
@@ -1462,12 +1462,12 @@ namespace RetrowaveRocket
 
             if (_hudInfoToggleText != null)
             {
-                _hudInfoToggleText.text = "Q HIDE";
+                _hudInfoToggleText.text = "H HIDE";
             }
 
             if (_hudInfoCollapsedText != null)
             {
-                _hudInfoCollapsedText.text = "Q show match info";
+                _hudInfoCollapsedText.text = "H show match info";
             }
 
             if (matchManager != null)
@@ -1562,7 +1562,7 @@ namespace RetrowaveRocket
 
             if (_hudInfoHintText != null)
             {
-                var hint = "Esc match menu  •  Tab scoreboard  •  Q hide panel";
+                var hint = "Esc match menu  •  Tab scoreboard  •  H hide panel";
 
                 if (CanCycleWarmupSpectatorTargets())
                 {
@@ -1769,7 +1769,10 @@ namespace RetrowaveRocket
                 return "No players in this section yet.";
             }
 
-            var builder = new StringBuilder(entries.Count * 48);
+            var builder = new StringBuilder(entries.Count * 56);
+            builder.Append("<mspace=0.56em>");
+            builder.AppendLine("PLAYER                  G  A  PING");
+            builder.AppendLine("-----------------------------------");
 
             for (var i = 0; i < entries.Count; i++)
             {
@@ -1786,23 +1789,23 @@ namespace RetrowaveRocket
                     playerLabel += " [Next]";
                 }
 
-                builder.Append(playerLabel);
-                builder.Append('\n');
-                builder.Append("G ");
-                builder.Append(entry.Goals);
-                builder.Append("   A ");
-                builder.Append(entry.Assists);
-                builder.Append("   P ");
-                builder.Append(entry.PingMs);
-                builder.Append(" ms");
-
-                if (i < entries.Count - 1)
-                {
-                    builder.Append("\n\n");
-                }
+                builder.Append(FormatScoreboardName(playerLabel).PadRight(22));
+                builder.Append(entry.Goals.ToString().PadLeft(2));
+                builder.Append(" ");
+                builder.Append(entry.Assists.ToString().PadLeft(2));
+                builder.Append(" ");
+                builder.Append($"{entry.PingMs}ms".PadLeft(6));
+                builder.AppendLine();
             }
 
+            builder.Append("</mspace>");
             return builder.ToString();
+        }
+
+        private static string FormatScoreboardName(string playerLabel)
+        {
+            var trimmed = string.IsNullOrWhiteSpace(playerLabel) ? "Player" : playerLabel.Trim();
+            return trimmed.Length <= 21 ? trimmed : $"{trimmed[..20]}~";
         }
 
         private GameObject CreateHudPanel(
@@ -1946,23 +1949,24 @@ namespace RetrowaveRocket
                 new Vector2(0f, 1f),
                 new Vector2(0f, 1f),
                 new Vector2(18f, -16f),
-                new Vector2(220f, 28f),
+                new Vector2(300f, 28f),
                 titleColor);
 
             var body = CreateHudText(
                 section.transform,
                 "Body",
                 string.Empty,
-                16f,
+                15f,
                 FontStyles.Normal,
                 TextAlignmentOptions.TopLeft,
                 new Vector2(0f, 1f),
                 new Vector2(0f, 1f),
                 new Vector2(0f, 1f),
                 new Vector2(18f, -58f),
-                new Vector2(284f, 360f),
+                new Vector2(356f, 360f),
                 new Color(0.92f, 0.95f, 1f, 0.98f));
             body.lineSpacing = 8f;
+            body.textWrappingMode = TextWrappingModes.NoWrap;
             return body;
         }
 

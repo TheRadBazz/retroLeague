@@ -446,8 +446,8 @@ namespace RetrowaveRocket
                 keyboardThrottle -= keyboard.sKey.isPressed ? 1f : 0f;
                 keyboardSteer += keyboard.dKey.isPressed ? 1f : 0f;
                 keyboardSteer -= keyboard.aKey.isPressed ? 1f : 0f;
-                keyboardRoll += keyboard.cKey.isPressed ? 1f : 0f;
-                keyboardRoll -= keyboard.zKey.isPressed ? 1f : 0f;
+                keyboardRoll += keyboard.eKey.isPressed ? 1f : 0f;
+                keyboardRoll -= keyboard.qKey.isPressed ? 1f : 0f;
                 keyboardBoost = keyboard.leftShiftKey.isPressed || keyboard.rightShiftKey.isPressed;
                 keyboardBrake = keyboard.leftCtrlKey.isPressed || keyboard.rightCtrlKey.isPressed;
 
