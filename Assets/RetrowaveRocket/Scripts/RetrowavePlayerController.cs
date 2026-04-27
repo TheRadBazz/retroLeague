@@ -334,7 +334,12 @@ namespace RetrowaveRocket
             RetrowaveMatchManager.Instance?.HandlePlayerDisplayName(OwnerClientId, displayName);
         }
 
-        public void ConfigureServer(RetrowaveTeam team, int spawnIndex)
+        public void ConfigureServer(RetrowaveTeam team, int spawnIndex, int teamPlayerCount)
+        {
+            ConfigureServer(team, RetrowaveArenaConfig.GetSpawnPoint(team, spawnIndex, teamPlayerCount));
+        }
+
+        public void ConfigureServer(RetrowaveTeam team, Vector3 spawnPosition)
         {
             if (!IsServer)
             {
@@ -344,9 +349,7 @@ namespace RetrowaveRocket
             _lobbyRoleValue.Value = team == RetrowaveTeam.Blue ? (int)RetrowaveLobbyRole.Blue : (int)RetrowaveLobbyRole.Pink;
             _hasSelectedRole.Value = true;
             _teamValue.Value = (int)team;
-            _rigidbody.isKinematic = false;
-            _rigidbody.useGravity = true;
-            _spawnPosition = RetrowaveArenaConfig.GetSpawnPoint(team, spawnIndex);
+            _spawnPosition = RetrowaveArenaConfig.ClampToPlayableSpawn(spawnPosition, team);
             _spawnRotation = RetrowaveArenaConfig.GetSpawnRotation(team);
             ResetToSpawn();
         }
@@ -360,7 +363,15 @@ namespace RetrowaveRocket
 
             _rigidbody.linearVelocity = Vector3.zero;
             _rigidbody.angularVelocity = Vector3.zero;
+            _rigidbody.isKinematic = true;
+            _rigidbody.useGravity = false;
+            _spawnPosition = RetrowaveArenaConfig.ClampToPlayableSpawn(_spawnPosition, Team);
             transform.SetPositionAndRotation(_spawnPosition, _spawnRotation);
+            _rigidbody.position = _spawnPosition;
+            _rigidbody.rotation = _spawnRotation;
+            Physics.SyncTransforms();
+            _rigidbody.isKinematic = false;
+            _rigidbody.useGravity = true;
             _podiumPresentationHidden.Value = false;
             _boostAmount.Value = RetrowaveArenaConfig.StartingBoost;
             _speedBoostTimer.Value = 0f;
@@ -583,7 +594,7 @@ namespace RetrowaveRocket
 
             _boostFx.Value = isBoosting;
 
-            if (input.ResetPressed || transform.position.y < -12f || transform.position.magnitude > 220f)
+            if (input.ResetPressed || !RetrowaveArenaConfig.IsWithinArenaRecoveryBounds(transform.position))
             {
                 ResetToSpawn();
                 return;

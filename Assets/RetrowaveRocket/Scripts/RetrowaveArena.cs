@@ -338,15 +338,27 @@ namespace RetrowaveRocket
 
         public static Vector3 GetSpawnPoint(RetrowaveTeam team, int slot)
         {
-            var columns = Mathf.Max(2, _currentLayout.SpawnColumns);
+            return GetSpawnPoint(team, slot, Mathf.Max(slot + 1, 1));
+        }
+
+        public static Vector3 GetSpawnPoint(RetrowaveTeam team, int slot, int teamPlayerCount)
+        {
+            var count = Mathf.Max(1, teamPlayerCount);
+            var columns = Mathf.Clamp(Mathf.CeilToInt(Mathf.Sqrt(count)), 1, 8);
             var row = slot / columns;
-            var column = slot % columns;
-            var columnProgress = columns <= 1 ? 0.5f : column / (float)(columns - 1);
-            var lateral = Mathf.Lerp(-_currentLayout.SpawnLaneHalfWidth, _currentLayout.SpawnLaneHalfWidth, columnProgress);
-            var depth = team == RetrowaveTeam.Blue
-                ? -_currentLayout.SpawnStartDepth - row * _currentLayout.SpawnRowSpacing
-                : _currentLayout.SpawnStartDepth + row * _currentLayout.SpawnRowSpacing;
-            return new Vector3(lateral, 1.35f, depth);
+            var rowStart = row * columns;
+            var rowCount = Mathf.CeilToInt(count / (float)columns);
+            var playersInRow = Mathf.Clamp(count - rowStart, 1, columns);
+            var column = Mathf.Clamp(slot - rowStart, 0, playersInRow - 1);
+            var columnProgress = playersInRow <= 1 ? 0.5f : column / (float)(playersInRow - 1);
+            var laneHalfWidth = Mathf.Min(_currentLayout.SpawnLaneHalfWidth, _currentLayout.FlatHalfWidth - 8f);
+            var lateral = Mathf.Lerp(-laneHalfWidth, laneHalfWidth, columnProgress);
+            var nearDepth = Mathf.Max(16f, _currentLayout.FlatHalfLength * 0.24f);
+            var farDepth = Mathf.Max(nearDepth + 6f, _currentLayout.FlatHalfLength - Mathf.Max(14f, _currentLayout.RampDepth + 6f));
+            var rowProgress = rowCount <= 1 ? 0.58f : row / (float)(rowCount - 1);
+            var depthMagnitude = Mathf.Lerp(nearDepth, farDepth, rowProgress);
+            var depth = team == RetrowaveTeam.Blue ? -depthMagnitude : depthMagnitude;
+            return ClampToPlayableSpawn(new Vector3(lateral, 1.35f, depth), team);
         }
 
         public static Quaternion GetSpawnRotation(RetrowaveTeam team)
@@ -363,6 +375,27 @@ namespace RetrowaveRocket
                 -laneWidth * 1.5f + lane * laneWidth,
                 _currentLayout.SpectatorHeight + row * 4f,
                 _currentLayout.SpectatorDepth);
+        }
+
+        public static Vector3 ClampToPlayableSpawn(Vector3 position, RetrowaveTeam team)
+        {
+            var safeX = Mathf.Max(0f, _currentLayout.FlatHalfWidth - 8f);
+            var nearDepth = Mathf.Max(12f, _currentLayout.FlatHalfLength * 0.18f);
+            var farDepth = Mathf.Max(nearDepth + 4f, _currentLayout.FlatHalfLength - Mathf.Max(12f, _currentLayout.RampDepth + 5f));
+            var depthMagnitude = Mathf.Clamp(Mathf.Abs(position.z), nearDepth, farDepth);
+            var signedDepth = team == RetrowaveTeam.Blue ? -depthMagnitude : depthMagnitude;
+            return new Vector3(
+                Mathf.Clamp(position.x, -safeX, safeX),
+                1.35f,
+                signedDepth);
+        }
+
+        public static bool IsWithinArenaRecoveryBounds(Vector3 position)
+        {
+            return position.y >= -12f
+                   && position.y <= _currentLayout.CeilingHeight + 2f
+                   && Mathf.Abs(position.x) <= _currentLayout.OuterHalfWidth + 5f
+                   && Mathf.Abs(position.z) <= _currentLayout.OuterHalfLength + 5f;
         }
     }
 

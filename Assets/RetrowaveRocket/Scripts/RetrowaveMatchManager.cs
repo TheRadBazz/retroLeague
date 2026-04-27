@@ -146,6 +146,22 @@ namespace RetrowaveRocket
         private ulong _previousTouchClientId = ulong.MaxValue;
         private RetrowaveTeam _previousTouchTeam;
         private double _previousTouchTime;
+        private static readonly Vector2[] SpawnClearanceOffsets =
+        {
+            Vector2.zero,
+            new Vector2(4.5f, 0f),
+            new Vector2(-4.5f, 0f),
+            new Vector2(0f, 4.5f),
+            new Vector2(0f, -4.5f),
+            new Vector2(4.5f, 4.5f),
+            new Vector2(-4.5f, 4.5f),
+            new Vector2(4.5f, -4.5f),
+            new Vector2(-4.5f, -4.5f),
+            new Vector2(9f, 0f),
+            new Vector2(-9f, 0f),
+            new Vector2(0f, 9f),
+            new Vector2(0f, -9f),
+        };
 
         public static RetrowaveMatchManager Instance { get; private set; }
 
@@ -944,6 +960,9 @@ namespace RetrowaveRocket
 
             var blueSlot = 0;
             var pinkSlot = 0;
+            var blueCount = GetActiveTeamCount(RetrowaveTeam.Blue);
+            var pinkCount = GetActiveTeamCount(RetrowaveTeam.Pink);
+            var reservedSpawnPositions = new List<Vector3>(blueCount + pinkCount);
 
             foreach (var clientId in GetSortedConnectedClientIds())
             {
@@ -962,12 +981,55 @@ namespace RetrowaveRocket
                 if (TryGetAssignedTeam(clientId, useActiveRole: true, out var team))
                 {
                     var spawnIndex = team == RetrowaveTeam.Blue ? blueSlot++ : pinkSlot++;
-                    player.ConfigureServer(team, spawnIndex);
+                    var teamCount = team == RetrowaveTeam.Blue ? blueCount : pinkCount;
+                    var preferredSpawn = RetrowaveArenaConfig.GetSpawnPoint(team, spawnIndex, teamCount);
+                    var resolvedSpawn = ResolveClearSpawnPoint(preferredSpawn, team, reservedSpawnPositions);
+                    reservedSpawnPositions.Add(resolvedSpawn);
+                    player.ConfigureServer(team, resolvedSpawn);
                     continue;
                 }
 
                 player.SetSpectatorStateServer(TryGetLobbyEntry(clientId, out var entry) && entry.HasSelectedRole);
             }
+        }
+
+        private static Vector3 ResolveClearSpawnPoint(Vector3 preferredSpawn, RetrowaveTeam team, List<Vector3> reservedSpawnPositions)
+        {
+            var baseSpawn = RetrowaveArenaConfig.ClampToPlayableSpawn(preferredSpawn, team);
+
+            for (var i = 0; i < SpawnClearanceOffsets.Length; i++)
+            {
+                var offset = SpawnClearanceOffsets[i];
+                var candidate = RetrowaveArenaConfig.ClampToPlayableSpawn(
+                    baseSpawn + new Vector3(offset.x, 0f, offset.y),
+                    team);
+
+                if (IsSpawnClear(candidate, reservedSpawnPositions))
+                {
+                    return candidate;
+                }
+            }
+
+            return baseSpawn;
+        }
+
+        private static bool IsSpawnClear(Vector3 candidate, List<Vector3> reservedSpawnPositions)
+        {
+            const float minSpawnSpacing = 3.8f;
+            var minSpacingSquared = minSpawnSpacing * minSpawnSpacing;
+
+            for (var i = 0; i < reservedSpawnPositions.Count; i++)
+            {
+                var offset = candidate - reservedSpawnPositions[i];
+                offset.y = 0f;
+
+                if (offset.sqrMagnitude < minSpacingSquared)
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private void RefreshActorSlotsForCurrentPhase()
