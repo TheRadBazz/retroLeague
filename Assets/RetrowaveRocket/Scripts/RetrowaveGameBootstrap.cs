@@ -3243,7 +3243,7 @@ namespace RetrowaveRocket
             var visual = Instantiate(sportCarPrefab, parent, false);
             visual.name = "Body Visual";
             DisableChildColliders(visual);
-            FitVisualToBounds(visual.transform, new Vector3(1.3f, 0.8f, 2.1f), new Vector3(0f, -0.02f, 0f));
+            FitVisualToBounds(visual.transform, new Vector3(1.3f, 0.8f, 2.1f), new Vector3(0f, -0.25f, 0f));
             return true;
         }
 
@@ -3252,7 +3252,7 @@ namespace RetrowaveRocket
             var visual = GameObject.CreatePrimitive(PrimitiveType.Cube);
             visual.name = "Body Visual";
             visual.transform.SetParent(parent, false);
-            visual.transform.localPosition = new Vector3(0f, -0.02f, 0f);
+            visual.transform.localPosition = new Vector3(0f, -0.25f, 0f);
             visual.transform.localScale = new Vector3(1.3f, 0.8f, 2.1f);
 
             var visualCollider = visual.GetComponent<BoxCollider>();

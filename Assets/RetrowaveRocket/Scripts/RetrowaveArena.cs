@@ -120,7 +120,7 @@ namespace RetrowaveRocket
         public Vector3[] PowerUpPositions { get; }
         public int Signature { get; }
 
-        public Vector3 BallSpawnPoint => new Vector3(0f, 1.35f, 0f);
+        public Vector3 BallSpawnPoint => new Vector3(0f, RetrowaveArenaConfig.GetBallSpawnHeight(0f, 0f), 0f);
 
         public static RetrowaveArenaLayout Resolve(RetrowaveMatchSettings settings)
         {
@@ -310,6 +310,8 @@ namespace RetrowaveRocket
         public const float SpeedBurstMultiplier = 1.4f;
         public const float SpeedBurstDuration = 4.5f;
         public const float PassiveBoostRegen = 2.5f;
+        private const float VehicleSpawnClearance = 1.05f;
+        private const float BallSpawnClearance = 1.35f;
 
         private static RetrowaveMatchSettings _currentSettings = RetrowaveMatchSettings.Default;
         private static RetrowaveArenaLayout _currentLayout = RetrowaveArenaLayout.Resolve(RetrowaveMatchSettings.Default);
@@ -358,7 +360,7 @@ namespace RetrowaveRocket
             var rowProgress = rowCount <= 1 ? 0.58f : row / (float)(rowCount - 1);
             var depthMagnitude = Mathf.Lerp(nearDepth, farDepth, rowProgress);
             var depth = team == RetrowaveTeam.Blue ? -depthMagnitude : depthMagnitude;
-            return ClampToPlayableSpawn(new Vector3(lateral, 1.35f, depth), team);
+            return ClampToPlayableSpawn(new Vector3(lateral, GetVehicleSpawnHeight(lateral, depth), depth), team);
         }
 
         public static Quaternion GetSpawnRotation(RetrowaveTeam team)
@@ -384,10 +386,31 @@ namespace RetrowaveRocket
             var farDepth = Mathf.Max(nearDepth + 4f, _currentLayout.FlatHalfLength - Mathf.Max(12f, _currentLayout.RampDepth + 5f));
             var depthMagnitude = Mathf.Clamp(Mathf.Abs(position.z), nearDepth, farDepth);
             var signedDepth = team == RetrowaveTeam.Blue ? -depthMagnitude : depthMagnitude;
+            var clampedX = Mathf.Clamp(position.x, -safeX, safeX);
             return new Vector3(
-                Mathf.Clamp(position.x, -safeX, safeX),
-                1.35f,
+                clampedX,
+                GetVehicleSpawnHeight(clampedX, signedDepth),
                 signedDepth);
+        }
+
+        public static float GetSurfaceHeight(float x, float z)
+        {
+            return RetrowaveArenaBuilder.EvaluateHeight(x, z);
+        }
+
+        public static float GetSurfaceSpawnHeight(float x, float z)
+        {
+            return GetVehicleSpawnHeight(x, z);
+        }
+
+        public static float GetVehicleSpawnHeight(float x, float z)
+        {
+            return GetSurfaceHeight(x, z) + VehicleSpawnClearance;
+        }
+
+        public static float GetBallSpawnHeight(float x, float z)
+        {
+            return GetSurfaceHeight(x, z) + BallSpawnClearance;
         }
 
         public static bool IsWithinArenaRecoveryBounds(Vector3 position)
@@ -789,32 +812,31 @@ namespace RetrowaveRocket
         {
             for (var z = -30f; z <= 30f; z += 6f)
             {
-                CreateStrip(
+                CreateFloorDecal(
                     parent,
                     $"Lane Strip {z:0}",
-                    new Vector3(0f, 0.03f, z),
-                    new Vector3(RetrowaveArenaConfig.FlatHalfWidth * 1.9f, 0.05f, 0.18f),
+                    new Vector3(0f, 0.016f, z),
+                    new Vector2(RetrowaveArenaConfig.FlatHalfWidth * 1.9f, 0.18f),
                     RetrowaveStyle.CreateUnlitMaterial(new Color(0.05f, 0.7f, 1f, 0.95f)));
             }
 
             for (var x = -18f; x <= 18f; x += 6f)
             {
-                CreateStrip(
+                CreateFloorDecal(
                     parent,
                     $"Cross Strip {x:0}",
-                    new Vector3(x, 0.03f, 0f),
-                    new Vector3(0.18f, 0.05f, RetrowaveArenaConfig.FlatHalfLength * 1.7f),
+                    new Vector3(x, 0.018f, 0f),
+                    new Vector2(0.18f, RetrowaveArenaConfig.FlatHalfLength * 1.7f),
                     RetrowaveStyle.CreateUnlitMaterial(new Color(1f, 0.18f, 0.74f, 0.9f)));
             }
 
-            var centerDisk = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            centerDisk.name = "Center Disk";
-            centerDisk.transform.SetParent(parent, false);
-            centerDisk.transform.position = new Vector3(0f, 0.04f, 0f);
-            centerDisk.transform.localScale = new Vector3(9f, 0.03f, 9f);
-            centerDisk.GetComponent<MeshRenderer>().sharedMaterial =
-                RetrowaveStyle.CreateUnlitMaterial(new Color(1f, 0.25f, 0.65f, 0.9f));
-            DisableCollider(centerDisk);
+            CreateFloorDisc(
+                parent,
+                "Center Disk",
+                new Vector3(0f, 0.02f, 0f),
+                4.5f,
+                72,
+                RetrowaveStyle.CreateUnlitMaterial(new Color(1f, 0.25f, 0.65f, 0.9f)));
 
             BuildRampTransitionAccents(parent);
         }
@@ -1147,6 +1169,55 @@ namespace RetrowaveRocket
             strip.transform.localScale = scale;
             strip.GetComponent<MeshRenderer>().sharedMaterial = material;
             return strip;
+        }
+
+        private static GameObject CreateFloorDecal(Transform parent, string name, Vector3 position, Vector2 size, Material material)
+        {
+            var decal = GameObject.CreatePrimitive(PrimitiveType.Plane);
+            decal.name = name;
+            decal.transform.SetParent(parent, false);
+            decal.transform.position = position;
+            decal.transform.localScale = new Vector3(size.x * 0.1f, 1f, size.y * 0.1f);
+            decal.GetComponent<MeshRenderer>().sharedMaterial = material;
+            DisableCollider(decal);
+            return decal;
+        }
+
+        private static GameObject CreateFloorDisc(Transform parent, string name, Vector3 position, float radius, int segments, Material material)
+        {
+            var clampedSegments = Mathf.Max(12, segments);
+            var disc = new GameObject(name);
+            disc.transform.SetParent(parent, false);
+            disc.transform.position = position;
+
+            var vertices = new Vector3[clampedSegments + 1];
+            var triangles = new int[clampedSegments * 3];
+            vertices[0] = Vector3.zero;
+
+            for (var i = 0; i < clampedSegments; i++)
+            {
+                var angle = (i / (float)clampedSegments) * Mathf.PI * 2f;
+                vertices[i + 1] = new Vector3(Mathf.Cos(angle) * radius, 0f, Mathf.Sin(angle) * radius);
+            }
+
+            for (var i = 0; i < clampedSegments; i++)
+            {
+                var next = (i + 1) % clampedSegments;
+                var triangleIndex = i * 3;
+                triangles[triangleIndex] = 0;
+                triangles[triangleIndex + 1] = next + 1;
+                triangles[triangleIndex + 2] = i + 1;
+            }
+
+            var mesh = new Mesh { name = $"{name} Mesh" };
+            mesh.vertices = vertices;
+            mesh.triangles = triangles;
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+
+            disc.AddComponent<MeshFilter>().sharedMesh = mesh;
+            disc.AddComponent<MeshRenderer>().sharedMaterial = material;
+            return disc;
         }
 
         private static void CreateBarrierVolume(Transform parent, string name, Vector3 position, Vector3 scale)

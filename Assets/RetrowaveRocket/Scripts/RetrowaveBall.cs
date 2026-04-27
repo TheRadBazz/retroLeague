@@ -123,6 +123,9 @@ namespace RetrowaveRocket
             _rigidbody.linearVelocity = Vector3.zero;
             _rigidbody.angularVelocity = Vector3.zero;
             transform.SetPositionAndRotation(RetrowaveArenaConfig.BallSpawnPoint, Quaternion.identity);
+            _rigidbody.position = RetrowaveArenaConfig.BallSpawnPoint;
+            _rigidbody.rotation = Quaternion.identity;
+            Physics.SyncTransforms();
         }
 
         private void ApplyPlayerHit(RetrowavePlayerController player, Collision collision)

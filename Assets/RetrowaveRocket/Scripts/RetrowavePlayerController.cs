@@ -55,7 +55,7 @@ namespace RetrowaveRocket
         private const float ProbeRayLength = 1.4f;
         private const float MinDriveableGroundNormalY = 0.52f;
         private const float MinSuspensionAlignment = 0.18f;
-        private const float RideHeight = 0.92f;
+        private const float RideHeight = 0.68f;
         private const float SuspensionSpring = 104f;
         private const float SuspensionDamping = 14.5f;
         private const float GroundDriveAcceleration = 58f;
