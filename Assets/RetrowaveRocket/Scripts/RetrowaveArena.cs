@@ -55,9 +55,9 @@ namespace RetrowaveRocket
         private const float FixedGoalHalfWidth = 12f;
         private const float FixedGoalDepth = 12f;
         private const float FixedGoalHeight = 7.5f;
-        private const float FixedRampWidth = 18f;
-        private const float FixedRampDepth = 24f;
-        private const float FixedRampHeight = 14f;
+        private const float FixedRampWidth = 9f;
+        private const float FixedRampDepth = 10f;
+        private const float FixedRampHeight = 7.5f;
         private const float FixedCeilingHeight = 36f;
 
         public RetrowaveArenaLayout(
@@ -207,7 +207,8 @@ namespace RetrowaveRocket
             var spectatorHeight = FixedCeilingHeight + 8f;
             var spectatorDepth = -flatHalfLength * 0.12f;
             var powerUps = BuildPowerUpPositions(flatHalfWidth, flatHalfLength, powerUpCount);
-            var signature = (signatureSeed * 1000) + (settings.MaxPlayers * 10) + powerUpCount;
+            var rampSignature = Mathf.RoundToInt((FixedRampWidth * 100f) + (FixedRampDepth * 10f) + FixedRampHeight);
+            var signature = (signatureSeed * 10000) + (settings.MaxPlayers * 100) + (powerUpCount * 10) + rampSignature;
 
             return new RetrowaveArenaLayout(
                 flatHalfWidth,
@@ -575,8 +576,10 @@ namespace RetrowaveRocket
 
     public static class RetrowaveArenaBuilder
     {
+        private const float GoalRampClearance = 1.25f;
         private static GameObject _arenaRoot;
         private static int _builtLayoutSignature = int.MinValue;
+        private static PhysicsMaterial _perimeterBounceMaterial;
 
         public static void EnsureBuilt()
         {
@@ -618,7 +621,7 @@ namespace RetrowaveRocket
         {
             var outsideX = Mathf.Max(0f, Mathf.Abs(x) - RetrowaveArenaConfig.FlatHalfWidth);
             var outsideZ = Mathf.Max(0f, Mathf.Abs(z) - RetrowaveArenaConfig.FlatHalfLength);
-            var inGoalChannel = Mathf.Abs(z) > RetrowaveArenaConfig.FlatHalfLength && Mathf.Abs(x) <= RetrowaveArenaConfig.GoalHalfWidth;
+            var inGoalChannel = Mathf.Abs(z) > RetrowaveArenaConfig.FlatHalfLength && Mathf.Abs(x) <= GoalClearanceHalfWidth;
 
             if (inGoalChannel)
             {
@@ -645,11 +648,19 @@ namespace RetrowaveRocket
             var mesh = GenerateArenaMesh(72, 104);
             meshFilter.sharedMesh = mesh;
             meshCollider.sharedMesh = mesh;
-            meshRenderer.sharedMaterial = RetrowaveStyle.CreateLitMaterial(
-                RetrowaveStyle.ArenaBase,
-                new Color(0.02f, 0.12f, 0.18f),
-                0.9f,
-                0.02f);
+            meshRenderer.sharedMaterials = new[]
+            {
+                RetrowaveStyle.CreateLitMaterial(
+                    new Color(0.035f, 0.12f, 0.17f),
+                    new Color(0.02f, 0.2f, 0.26f),
+                    0.92f,
+                    0.02f),
+                RetrowaveStyle.CreateLitMaterial(
+                    new Color(0.018f, 0.035f, 0.08f),
+                    new Color(0.04f, 0.34f, 0.42f),
+                    0.82f,
+                    0.02f),
+            };
 
             var underlay = GameObject.CreatePrimitive(PrimitiveType.Cube);
             underlay.name = "Arena Underlay";
@@ -673,7 +684,8 @@ namespace RetrowaveRocket
             var vertexCount = verticesPerRow * (lengthSegments + 1);
             var vertices = new Vector3[vertexCount];
             var uvs = new Vector2[vertexCount];
-            var triangles = new int[widthSegments * lengthSegments * 6];
+            var flatTriangles = new System.Collections.Generic.List<int>(widthSegments * lengthSegments * 3);
+            var rampTriangles = new System.Collections.Generic.List<int>(widthSegments * lengthSegments * 3);
 
             var index = 0;
 
@@ -694,19 +706,23 @@ namespace RetrowaveRocket
                 }
             }
 
-            var triangleIndex = 0;
-
             for (var z = 0; z < lengthSegments; z++)
             {
                 for (var x = 0; x < widthSegments; x++)
                 {
                     var root = z * verticesPerRow + x;
-                    triangles[triangleIndex++] = root;
-                    triangles[triangleIndex++] = root + verticesPerRow;
-                    triangles[triangleIndex++] = root + 1;
-                    triangles[triangleIndex++] = root + 1;
-                    triangles[triangleIndex++] = root + verticesPerRow;
-                    triangles[triangleIndex++] = root + verticesPerRow + 1;
+                    var centerXPercent = (x + 0.5f) / widthSegments;
+                    var centerZPercent = (z + 0.5f) / lengthSegments;
+                    var centerX = Mathf.Lerp(-RetrowaveArenaConfig.OuterHalfWidth, RetrowaveArenaConfig.OuterHalfWidth, centerXPercent);
+                    var centerZ = Mathf.Lerp(-RetrowaveArenaConfig.OuterHalfLength, RetrowaveArenaConfig.OuterHalfLength, centerZPercent);
+                    var targetTriangles = IsFlatFieldSurface(centerX, centerZ) ? flatTriangles : rampTriangles;
+
+                    targetTriangles.Add(root);
+                    targetTriangles.Add(root + verticesPerRow);
+                    targetTriangles.Add(root + 1);
+                    targetTriangles.Add(root + 1);
+                    targetTriangles.Add(root + verticesPerRow);
+                    targetTriangles.Add(root + verticesPerRow + 1);
                 }
             }
 
@@ -714,14 +730,27 @@ namespace RetrowaveRocket
             {
                 name = "Retrowave Arena Surface",
                 vertices = vertices,
-                triangles = triangles,
                 uv = uvs,
             };
 
+            mesh.subMeshCount = 2;
+            mesh.SetTriangles(flatTriangles, 0);
+            mesh.SetTriangles(rampTriangles, 1);
             mesh.RecalculateNormals();
             mesh.RecalculateBounds();
             return mesh;
         }
+
+        private static bool IsFlatFieldSurface(float x, float z)
+        {
+            var inFlatField = Mathf.Abs(x) <= RetrowaveArenaConfig.FlatHalfWidth
+                              && Mathf.Abs(z) <= RetrowaveArenaConfig.FlatHalfLength;
+            var inGoalChannel = Mathf.Abs(z) > RetrowaveArenaConfig.FlatHalfLength
+                                && Mathf.Abs(x) <= GoalClearanceHalfWidth;
+            return inFlatField || inGoalChannel;
+        }
+
+        private static float GoalClearanceHalfWidth => RetrowaveArenaConfig.GoalHalfWidth + GoalRampClearance;
 
         private static void BuildFieldStrips(Transform parent)
         {
@@ -753,6 +782,55 @@ namespace RetrowaveRocket
             centerDisk.GetComponent<MeshRenderer>().sharedMaterial =
                 RetrowaveStyle.CreateUnlitMaterial(new Color(1f, 0.25f, 0.65f, 0.9f));
             DisableCollider(centerDisk);
+
+            BuildRampTransitionAccents(parent);
+        }
+
+        private static void BuildRampTransitionAccents(Transform parent)
+        {
+            var sideMaterial = RetrowaveStyle.CreateUnlitMaterial(new Color(0.12f, 0.95f, 1f, 0.96f));
+            var endMaterial = RetrowaveStyle.CreateUnlitMaterial(new Color(1f, 0.2f, 0.74f, 0.94f));
+
+            DisableCollider(CreateStrip(
+                parent,
+                "Left Ramp Seam",
+                new Vector3(-RetrowaveArenaConfig.FlatHalfWidth, 0.08f, 0f),
+                new Vector3(0.22f, 0.08f, RetrowaveArenaConfig.FlatHalfLength * 2f),
+                sideMaterial));
+            DisableCollider(CreateStrip(
+                parent,
+                "Right Ramp Seam",
+                new Vector3(RetrowaveArenaConfig.FlatHalfWidth, 0.08f, 0f),
+                new Vector3(0.22f, 0.08f, RetrowaveArenaConfig.FlatHalfLength * 2f),
+                sideMaterial));
+
+            var goalClearanceHalfWidth = GoalClearanceHalfWidth;
+            var endSegmentWidth = Mathf.Max(0f, RetrowaveArenaConfig.FlatHalfWidth - goalClearanceHalfWidth);
+
+            if (endSegmentWidth <= 0.01f)
+            {
+                return;
+            }
+
+            var leftSegmentCenter = -(goalClearanceHalfWidth + endSegmentWidth * 0.5f);
+            var rightSegmentCenter = goalClearanceHalfWidth + endSegmentWidth * 0.5f;
+
+            for (var direction = -1; direction <= 1; direction += 2)
+            {
+                var seamZ = direction * RetrowaveArenaConfig.FlatHalfLength;
+                DisableCollider(CreateStrip(
+                    parent,
+                    $"End Ramp Seam Left {direction}",
+                    new Vector3(leftSegmentCenter, 0.08f, seamZ),
+                    new Vector3(endSegmentWidth, 0.08f, 0.22f),
+                    endMaterial));
+                DisableCollider(CreateStrip(
+                    parent,
+                    $"End Ramp Seam Right {direction}",
+                    new Vector3(rightSegmentCenter, 0.08f, seamZ),
+                    new Vector3(endSegmentWidth, 0.08f, 0.22f),
+                    endMaterial));
+            }
         }
 
         private static void BuildGoals(Transform parent)
@@ -819,70 +897,152 @@ namespace RetrowaveRocket
             root.transform.SetParent(parent, false);
 
             var teamGlow = RetrowaveStyle.GetTeamGlow(team);
+            var teamBase = RetrowaveStyle.GetTeamBase(team);
             var frameMaterial = RetrowaveStyle.CreateLitMaterial(
-                RetrowaveStyle.GetTeamBase(team),
+                Color.Lerp(teamBase, Color.white, 0.18f),
                 teamGlow * 2.5f,
                 0.92f,
                 0.06f);
+            var interiorMaterial = RetrowaveStyle.CreateLitMaterial(
+                new Color(0.025f, 0.035f, 0.075f),
+                teamGlow * 0.28f,
+                0.78f,
+                0.01f);
+            var floorMaterial = RetrowaveStyle.CreateLitMaterial(
+                new Color(0.035f, 0.055f, 0.09f),
+                teamGlow * 0.38f,
+                0.88f,
+                0.02f);
+            var shadowMaterial = RetrowaveStyle.CreateLitMaterial(
+                new Color(0.012f, 0.012f, 0.032f),
+                teamGlow * 0.12f,
+                0.65f,
+                0f);
+            var trimMaterial = RetrowaveStyle.CreateUnlitMaterial(Color.Lerp(teamGlow, Color.white, 0.16f));
 
-            var goalCenterZ = direction * (RetrowaveArenaConfig.FlatHalfLength + RetrowaveArenaConfig.GoalDepth * 0.55f);
+            var cageWallCenterZ = RetrowaveArenaConfig.OuterHalfLength + 0.9f;
+            var cageWallInnerFaceZ = cageWallCenterZ - 0.6f;
+            var goalFrontZ = RetrowaveArenaConfig.FlatHalfLength - 0.18f;
+            var goalBackZ = cageWallInnerFaceZ + 0.18f;
+            var goalDepth = Mathf.Max(RetrowaveArenaConfig.GoalDepth, goalBackZ - goalFrontZ);
+            var goalCenterZ = direction * ((goalFrontZ + goalBackZ) * 0.5f);
+            var goalBackWallZ = direction * goalBackZ;
+            var goalFrontWorldZ = direction * goalFrontZ;
+            var goalFaceOffset = -direction * 0.32f;
+            var goalHalfWidth = RetrowaveArenaConfig.GoalHalfWidth;
+            var goalHeight = RetrowaveArenaConfig.GoalHeight;
+            var sideX = goalHalfWidth + 0.14f;
 
             CreateStrip(
                 root.transform,
-                "Floor",
-                new Vector3(0f, 0.03f, goalCenterZ),
-                new Vector3(RetrowaveArenaConfig.GoalHalfWidth * 2.15f, 0.06f, RetrowaveArenaConfig.GoalDepth),
-                frameMaterial);
+                "Interior Floor",
+                new Vector3(0f, 0.035f, goalCenterZ),
+                new Vector3(goalHalfWidth * 2.05f, 0.07f, goalDepth),
+                floorMaterial);
 
             CreateStrip(
                 root.transform,
-                "Back Wall",
-                new Vector3(0f, 2.6f, direction * (RetrowaveArenaConfig.FlatHalfLength + RetrowaveArenaConfig.GoalDepth)),
-                new Vector3(RetrowaveArenaConfig.GoalHalfWidth * 2.1f, RetrowaveArenaConfig.GoalHeight, 0.35f),
+                "Back Shadow Panel",
+                new Vector3(0f, goalHeight * 0.45f, goalBackWallZ),
+                new Vector3(goalHalfWidth * 2.05f, goalHeight * 0.9f, 0.5f),
+                shadowMaterial);
+
+            CreateStrip(
+                root.transform,
+                "Left Interior Wall",
+                new Vector3(-sideX, goalHeight * 0.45f, goalCenterZ),
+                new Vector3(0.36f, goalHeight * 0.9f, goalDepth),
+                interiorMaterial);
+            CreateStrip(
+                root.transform,
+                "Right Interior Wall",
+                new Vector3(sideX, goalHeight * 0.45f, goalCenterZ),
+                new Vector3(0.36f, goalHeight * 0.9f, goalDepth),
+                interiorMaterial);
+            CreateStrip(
+                root.transform,
+                "Interior Ceiling",
+                new Vector3(0f, goalHeight + 0.12f, goalCenterZ),
+                new Vector3(goalHalfWidth * 2.05f, 0.32f, goalDepth),
+                interiorMaterial);
+
+            CreateStrip(
+                root.transform,
+                "Front Left Post",
+                new Vector3(-sideX, goalHeight * 0.5f, goalFrontWorldZ),
+                new Vector3(0.62f, goalHeight + 0.46f, 0.62f),
+                frameMaterial);
+            CreateStrip(
+                root.transform,
+                "Front Right Post",
+                new Vector3(sideX, goalHeight * 0.5f, goalFrontWorldZ),
+                new Vector3(0.62f, goalHeight + 0.46f, 0.62f),
+                frameMaterial);
+            CreateStrip(
+                root.transform,
+                "Front Crossbar",
+                new Vector3(0f, goalHeight + 0.24f, goalFrontWorldZ),
+                new Vector3(goalHalfWidth * 2.35f, 0.52f, 0.62f),
+                frameMaterial);
+            CreateStrip(
+                root.transform,
+                "Front Base Rail",
+                new Vector3(0f, 0.22f, goalFrontWorldZ),
+                new Vector3(goalHalfWidth * 2.25f, 0.22f, 0.44f),
                 frameMaterial);
 
-            var sideX = RetrowaveArenaConfig.GoalHalfWidth + 0.1f;
-            CreateStrip(
-                root.transform,
-                "Left Wall",
-                new Vector3(-sideX, 2.6f, goalCenterZ),
-                new Vector3(0.35f, RetrowaveArenaConfig.GoalHeight, RetrowaveArenaConfig.GoalDepth),
-                frameMaterial);
-            CreateStrip(
-                root.transform,
-                "Right Wall",
-                new Vector3(sideX, 2.6f, goalCenterZ),
-                new Vector3(0.35f, RetrowaveArenaConfig.GoalHeight, RetrowaveArenaConfig.GoalDepth),
-                frameMaterial);
-            CreateStrip(
-                root.transform,
-                "Top Bar",
-                new Vector3(0f, RetrowaveArenaConfig.GoalHeight + 0.1f, goalCenterZ),
-                new Vector3(RetrowaveArenaConfig.GoalHalfWidth * 2.1f, 0.35f, RetrowaveArenaConfig.GoalDepth),
-                frameMaterial);
+            for (var i = -2; i <= 2; i++)
+            {
+                DisableCollider(CreateStrip(
+                    root.transform,
+                    $"Back Grid Vertical {i}",
+                    new Vector3(i * (goalHalfWidth * 0.36f), goalHeight * 0.48f, goalBackWallZ + goalFaceOffset),
+                    new Vector3(0.11f, goalHeight * 0.74f, 0.08f),
+                    trimMaterial));
+            }
+
+            for (var i = 1; i <= 3; i++)
+            {
+                DisableCollider(CreateStrip(
+                    root.transform,
+                    $"Back Grid Horizontal {i}",
+                    new Vector3(0f, i * (goalHeight * 0.22f), goalBackWallZ + goalFaceOffset),
+                    new Vector3(goalHalfWidth * 1.72f, 0.1f, 0.08f),
+                    trimMaterial));
+            }
+
+            for (var i = 1; i <= 3; i++)
+            {
+                var depthOffset = Mathf.Lerp(goalFrontZ + 1.8f, goalBackZ - 1.2f, i / 4f);
+                DisableCollider(CreateStrip(
+                    root.transform,
+                    $"Ceiling Depth Rib {i}",
+                    new Vector3(0f, goalHeight + 0.34f, direction * depthOffset),
+                    new Vector3(goalHalfWidth * 1.82f, 0.08f, 0.12f),
+                    trimMaterial));
+            }
 
             var trigger = new GameObject("Goal Trigger");
             trigger.transform.SetParent(root.transform, false);
-            trigger.transform.position = new Vector3(0f, RetrowaveArenaConfig.GoalHeight * 0.45f, goalCenterZ);
+            trigger.transform.position = new Vector3(0f, goalHeight * 0.45f, goalCenterZ);
             var boxCollider = trigger.AddComponent<BoxCollider>();
             boxCollider.isTrigger = true;
             boxCollider.size = new Vector3(
-                RetrowaveArenaConfig.GoalHalfWidth * 1.95f,
-                RetrowaveArenaConfig.GoalHeight * 0.9f,
-                RetrowaveArenaConfig.GoalDepth * 0.85f);
+                goalHalfWidth * 1.95f,
+                goalHeight * 0.9f,
+                goalDepth * 0.92f);
 
             var goalVolume = trigger.AddComponent<RetrowaveGoalVolume>();
             goalVolume.Team = team;
 
             var lightObject = new GameObject("Glow");
             lightObject.transform.SetParent(root.transform, false);
-            lightObject.transform.position = new Vector3(0f, 4f, goalCenterZ - direction * 1.2f);
+            lightObject.transform.position = new Vector3(0f, goalHeight * 0.56f, goalCenterZ - direction * 1.2f);
             var light = lightObject.AddComponent<Light>();
             light.type = LightType.Point;
-            light.range = 18f;
-            light.intensity = 9f;
+            light.range = 20f;
+            light.intensity = 5.6f;
             light.color = teamGlow;
-
         }
 
         private static void BuildBackdrop(Transform parent)
@@ -964,12 +1124,38 @@ namespace RetrowaveRocket
             barrier.transform.position = position;
             barrier.transform.localScale = scale;
 
+            var collider = barrier.GetComponent<Collider>();
+
+            if (collider != null)
+            {
+                collider.material = ResolvePerimeterBounceMaterial();
+            }
+
             var renderer = barrier.GetComponent<MeshRenderer>();
 
             if (renderer != null)
             {
                 renderer.enabled = false;
             }
+        }
+
+        private static PhysicsMaterial ResolvePerimeterBounceMaterial()
+        {
+            if (_perimeterBounceMaterial != null)
+            {
+                return _perimeterBounceMaterial;
+            }
+
+            _perimeterBounceMaterial = new PhysicsMaterial("RT_PerimeterBounce")
+            {
+                bounciness = 0.34f,
+                dynamicFriction = 0f,
+                staticFriction = 0f,
+                bounceCombine = PhysicsMaterialCombine.Maximum,
+                frictionCombine = PhysicsMaterialCombine.Minimum,
+            };
+
+            return _perimeterBounceMaterial;
         }
 
         private static void DisableCollider(GameObject gameObject)
