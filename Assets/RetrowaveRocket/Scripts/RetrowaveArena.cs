@@ -556,6 +556,44 @@ namespace RetrowaveRocket
             return material;
         }
 
+        public static Material CreateTerrainLayerMaterial(TerrainLayer terrainLayer, Color tint, Color emissionColor, float uvWorldScale = 0.08f)
+        {
+            var material = CreateLitMaterial(tint, emissionColor, 0.28f, 0f);
+
+            if (terrainLayer == null)
+            {
+                return material;
+            }
+
+            ApplyTexture(material, "_BaseMap", terrainLayer.diffuseTexture);
+            ApplyTexture(material, "_MainTex", terrainLayer.diffuseTexture);
+            ApplyTexture(material, "_BumpMap", terrainLayer.normalMapTexture);
+
+            if (terrainLayer.normalMapTexture != null)
+            {
+                material.EnableKeyword("_NORMALMAP");
+                SetMaterialFloat(material, "_BumpScale", Mathf.Max(0f, terrainLayer.normalScale));
+            }
+
+            SetMaterialFloat(material, "_Metallic", Mathf.Max(0f, terrainLayer.metallic));
+            SetMaterialFloat(material, "_Smoothness", Mathf.Clamp01(terrainLayer.smoothness));
+
+            var tileSize = terrainLayer.tileSize;
+
+            if (tileSize.x > 0.001f && tileSize.y > 0.001f)
+            {
+                var textureScale = new Vector2(
+                    1f / Mathf.Max(0.001f, tileSize.x * uvWorldScale),
+                    1f / Mathf.Max(0.001f, tileSize.y * uvWorldScale));
+
+                SetTextureScale(material, "_BaseMap", textureScale);
+                SetTextureScale(material, "_MainTex", textureScale);
+                SetTextureScale(material, "_BumpMap", textureScale);
+            }
+
+            return material;
+        }
+
         public static Material CreateUnlitMaterial(Color color)
         {
             var material = CreateMaterialInstance(ref _litTemplate, ref _unlitShader, ResolveUnlitShader());
@@ -581,6 +619,30 @@ namespace RetrowaveRocket
         public static Color GetTeamGlow(RetrowaveTeam team)
         {
             return team == RetrowaveTeam.Blue ? BlueGlow : PinkGlow;
+        }
+
+        private static void ApplyTexture(Material material, string propertyName, Texture texture)
+        {
+            if (texture != null && material.HasProperty(propertyName))
+            {
+                material.SetTexture(propertyName, texture);
+            }
+        }
+
+        private static void SetTextureScale(Material material, string propertyName, Vector2 scale)
+        {
+            if (material.HasProperty(propertyName))
+            {
+                material.SetTextureScale(propertyName, scale);
+            }
+        }
+
+        private static void SetMaterialFloat(Material material, string propertyName, float value)
+        {
+            if (material.HasProperty(propertyName))
+            {
+                material.SetFloat(propertyName, value);
+            }
         }
 
         private static Material CreateMaterialInstance(ref Material template, ref Shader shaderCache, Shader resolvedShader)
@@ -656,6 +718,7 @@ namespace RetrowaveRocket
     public static class RetrowaveArenaBuilder
     {
         private const float GoalRampClearance = 1.25f;
+        private const string MapMagicGrassLayerResourcePath = "RetrowaveRocket/MapMagicGrassGreen";
         private static GameObject _arenaRoot;
         private static int _builtLayoutSignature = int.MinValue;
         private static PhysicsMaterial _perimeterBounceMaterial;
@@ -729,11 +792,7 @@ namespace RetrowaveRocket
             meshCollider.sharedMesh = mesh;
             meshRenderer.sharedMaterials = new[]
             {
-                RetrowaveStyle.CreateLitMaterial(
-                    new Color(0.035f, 0.12f, 0.17f),
-                    new Color(0.02f, 0.2f, 0.26f),
-                    0.92f,
-                    0.02f),
+                CreateMapMagicGrassPitchMaterial(),
                 RetrowaveStyle.CreateLitMaterial(
                     new Color(0.018f, 0.035f, 0.08f),
                     new Color(0.04f, 0.34f, 0.42f),
@@ -755,6 +814,22 @@ namespace RetrowaveRocket
                 0.55f,
                 0f);
             DisableCollider(underlay);
+        }
+
+        private static Material CreateMapMagicGrassPitchMaterial()
+        {
+            var grassLayer = Resources.Load<TerrainLayer>(MapMagicGrassLayerResourcePath);
+
+            if (grassLayer == null)
+            {
+                Debug.LogWarning($"RetrowaveArenaBuilder: MapMagic grass layer was not found at Resources/{MapMagicGrassLayerResourcePath}. Using fallback pitch grass material.");
+            }
+
+            return RetrowaveStyle.CreateTerrainLayerMaterial(
+                grassLayer,
+                new Color(0.32f, 0.72f, 0.28f, 1f),
+                new Color(0.02f, 0.08f, 0.025f),
+                0.08f);
         }
 
         private static Mesh GenerateArenaMesh(int widthSegments, int lengthSegments)
@@ -940,32 +1015,32 @@ namespace RetrowaveRocket
 
             for (var z = -halfLength; z <= halfLength; z += 8f)
             {
-                DisableCollider(CreateStrip(root.transform, $"Left Cage Post {z:0}", new Vector3(-halfWidth, wallHeight * 0.5f, z), new Vector3(0.24f, wallHeight, 0.24f), wallMaterial));
-                DisableCollider(CreateStrip(root.transform, $"Right Cage Post {z:0}", new Vector3(halfWidth, wallHeight * 0.5f, z), new Vector3(0.24f, wallHeight, 0.24f), wallMaterial));
+                CreateCageStrip(root.transform, $"Left Cage Post {z:0}", new Vector3(-halfWidth, wallHeight * 0.5f, z), new Vector3(0.24f, wallHeight, 0.24f), wallMaterial);
+                CreateCageStrip(root.transform, $"Right Cage Post {z:0}", new Vector3(halfWidth, wallHeight * 0.5f, z), new Vector3(0.24f, wallHeight, 0.24f), wallMaterial);
             }
 
             for (var x = -halfWidth; x <= halfWidth; x += 8f)
             {
-                DisableCollider(CreateStrip(root.transform, $"North Cage Post {x:0}", new Vector3(x, wallHeight * 0.5f, halfLength), new Vector3(0.24f, wallHeight, 0.24f), wallMaterial));
-                DisableCollider(CreateStrip(root.transform, $"South Cage Post {x:0}", new Vector3(x, wallHeight * 0.5f, -halfLength), new Vector3(0.24f, wallHeight, 0.24f), wallMaterial));
+                CreateCageStrip(root.transform, $"North Cage Post {x:0}", new Vector3(x, wallHeight * 0.5f, halfLength), new Vector3(0.24f, wallHeight, 0.24f), wallMaterial);
+                CreateCageStrip(root.transform, $"South Cage Post {x:0}", new Vector3(x, wallHeight * 0.5f, -halfLength), new Vector3(0.24f, wallHeight, 0.24f), wallMaterial);
             }
 
             for (var y = 4f; y <= wallHeight; y += 5f)
             {
-                DisableCollider(CreateStrip(root.transform, $"Left Cage Rail {y:0}", new Vector3(-halfWidth, y, 0f), new Vector3(0.16f, 0.16f, halfLength * 2f), accentMaterial));
-                DisableCollider(CreateStrip(root.transform, $"Right Cage Rail {y:0}", new Vector3(halfWidth, y, 0f), new Vector3(0.16f, 0.16f, halfLength * 2f), accentMaterial));
-                DisableCollider(CreateStrip(root.transform, $"North Cage Rail {y:0}", new Vector3(0f, y, halfLength), new Vector3(halfWidth * 2f, 0.16f, 0.16f), accentMaterial));
-                DisableCollider(CreateStrip(root.transform, $"South Cage Rail {y:0}", new Vector3(0f, y, -halfLength), new Vector3(halfWidth * 2f, 0.16f, 0.16f), accentMaterial));
+                CreateCageStrip(root.transform, $"Left Cage Rail {y:0}", new Vector3(-halfWidth, y, 0f), new Vector3(0.16f, 0.16f, halfLength * 2f), accentMaterial);
+                CreateCageStrip(root.transform, $"Right Cage Rail {y:0}", new Vector3(halfWidth, y, 0f), new Vector3(0.16f, 0.16f, halfLength * 2f), accentMaterial);
+                CreateCageStrip(root.transform, $"North Cage Rail {y:0}", new Vector3(0f, y, halfLength), new Vector3(halfWidth * 2f, 0.16f, 0.16f), accentMaterial);
+                CreateCageStrip(root.transform, $"South Cage Rail {y:0}", new Vector3(0f, y, -halfLength), new Vector3(halfWidth * 2f, 0.16f, 0.16f), accentMaterial);
             }
 
             for (var z = -halfLength + 6f; z <= halfLength - 6f; z += 10f)
             {
-                DisableCollider(CreateStrip(root.transform, $"Roof Span {z:0}", new Vector3(0f, wallHeight + 0.12f, z), new Vector3(halfWidth * 2f, 0.12f, 0.12f), wallMaterial));
+                CreateCageStrip(root.transform, $"Roof Span {z:0}", new Vector3(0f, wallHeight + 0.12f, z), new Vector3(halfWidth * 2f, 0.12f, 0.12f), wallMaterial);
             }
 
             for (var x = -halfWidth + 6f; x <= halfWidth - 6f; x += 10f)
             {
-                DisableCollider(CreateStrip(root.transform, $"Roof Rib {x:0}", new Vector3(x, wallHeight + 0.12f, 0f), new Vector3(0.12f, 0.12f, halfLength * 2f), wallMaterial));
+                CreateCageStrip(root.transform, $"Roof Rib {x:0}", new Vector3(x, wallHeight + 0.12f, 0f), new Vector3(0.12f, 0.12f, halfLength * 2f), wallMaterial);
             }
         }
 
@@ -1194,6 +1269,14 @@ namespace RetrowaveRocket
             return strip;
         }
 
+        private static GameObject CreateCageStrip(Transform parent, string name, Vector3 position, Vector3 scale, Material material)
+        {
+            var strip = CreateStrip(parent, name, position, scale, material);
+            DisableCollider(strip);
+            DisableRendererShadows(strip);
+            return strip;
+        }
+
         private static GameObject CreateFloorDecal(Transform parent, string name, Vector3 position, Vector2 size, Material material)
         {
             var decal = GameObject.CreatePrimitive(PrimitiveType.Plane);
@@ -1293,6 +1376,19 @@ namespace RetrowaveRocket
             {
                 collider.enabled = false;
             }
+        }
+
+        private static void DisableRendererShadows(GameObject gameObject)
+        {
+            var renderer = gameObject.GetComponent<Renderer>();
+
+            if (renderer == null)
+            {
+                return;
+            }
+
+            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
         }
     }
 
