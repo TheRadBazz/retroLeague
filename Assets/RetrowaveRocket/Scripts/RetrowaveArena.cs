@@ -434,8 +434,10 @@ namespace RetrowaveRocket
         }
 
         public static Quaternion VehicleRotation => Quaternion.LookRotation(Vector3.back, Vector3.up);
+        public static Quaternion LabelRotation => Quaternion.LookRotation(Vector3.back, Vector3.up);
         public static Vector3 CameraLookPoint => Center + new Vector3(0f, 2.7f, 1.6f);
         public static Vector3 CameraPosition => Center + new Vector3(0f, 8.5f, -23f);
+        public static Vector3 LineupLabelPosition => Center + new Vector3(0f, 2.65f, 7.6f);
 
         public static Vector3 GetPlatformPosition(int rank)
         {
@@ -459,6 +461,27 @@ namespace RetrowaveRocket
                 2 => new Vector3(4.4f, 1.04f, 3.9f),
                 _ => Vector3.one,
             };
+        }
+
+        public static string GetPlacementLabel(int rank)
+        {
+            return rank switch
+            {
+                0 => "1ST",
+                1 => "2ND",
+                2 => "3RD",
+                _ => string.Empty,
+            };
+        }
+
+        public static Vector3 GetPlacementLabelPosition(int rank)
+        {
+            var platformPosition = GetPlatformPosition(rank);
+            var platformScale = GetPlatformScale(rank);
+            return new Vector3(
+                platformPosition.x,
+                platformPosition.y + platformScale.y * 0.5f + 0.18f,
+                platformPosition.z - platformScale.z * 0.5f - 0.16f);
         }
 
         public static Vector3 GetVehiclePosition(int rank, int totalCount)

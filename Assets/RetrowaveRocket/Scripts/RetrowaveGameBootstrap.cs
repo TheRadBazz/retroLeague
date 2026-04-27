@@ -87,6 +87,7 @@ namespace RetrowaveRocket
         private int _goalCelebrationBlueScore;
         private int _goalCelebrationPinkScore;
         private GameObject _gameplayMenuRoot;
+        private RectTransform _gameplayMenuPanelRect;
         private GameObject _gameplayMenuEventSystem;
         private TMP_FontAsset _gameplayMenuFont;
         private TMP_Text _gameplayMenuTitleText;
@@ -779,6 +780,7 @@ namespace RetrowaveRocket
             panelRect.anchorMax = new Vector2(0.5f, 0.5f);
             panelRect.pivot = new Vector2(0.5f, 0.5f);
             panelRect.sizeDelta = new Vector2(700f, 560f);
+            _gameplayMenuPanelRect = panelRect;
 
             var panelImage = panel.GetComponent<Image>();
             panelImage.color = new Color(0.03f, 0.05f, 0.1f, 0.94f);
@@ -810,6 +812,7 @@ namespace RetrowaveRocket
             {
                 Destroy(_gameplayMenuRoot);
                 _gameplayMenuRoot = null;
+                _gameplayMenuPanelRect = null;
             }
 
             if (_gameplayMenuEventSystem != null)
@@ -903,7 +906,7 @@ namespace RetrowaveRocket
             {
                 _gameplayMenuTitleText.text = "Final Score";
                 _gameplayMenuBodyText.text = BuildFinalScoreSummary(matchManager);
-                _gameplayMenuHintText.text = "Change teams here for the next run, or leave the lobby.";
+                _gameplayMenuHintText.text = "Change teams for the next run, spectate, or leave the lobby.";
             }
             else
             {
@@ -929,6 +932,7 @@ namespace RetrowaveRocket
 
             _gameplayStartButton.gameObject.SetActive(hostIsPresent);
             _gameplayResumeButton.gameObject.SetActive(!forceSelection && !sessionBootstrapPending && !matchComplete);
+            ApplyGameplayMenuLayout(matchComplete);
 
             if (_gameplayStartButtonLabel != null && matchManager != null)
             {
@@ -953,8 +957,8 @@ namespace RetrowaveRocket
             else if (matchComplete && hostIsPresent)
             {
                 _gameplayMenuFooterText.text = hostCanStart
-                    ? "Start New Game returns everyone to a fresh countdown. Exit Game closes the network session."
-                    : "Choose at least one blue and one pink player before starting a new game.";
+                    ? "Start New Game begins a fresh kickoff. Exit Game closes the network session."
+                    : "Need at least one blue and one pink player before starting again.";
             }
             else if (matchComplete)
             {
@@ -1624,7 +1628,9 @@ namespace RetrowaveRocket
                     _hudScoreClockText.text = matchManager.Phase switch
                     {
                         RetrowaveMatchPhase.Warmup => $"{FormatRoundDuration(matchManager.RoundDurationSeconds)} x {matchManager.RoundCount}",
-                        RetrowaveMatchPhase.Podium => $"{Mathf.CeilToInt(matchManager.PodiumTimeRemaining)}s",
+                        RetrowaveMatchPhase.Podium => matchManager.HasPodiumWinner
+                            ? $"{GetTeamLabel(matchManager.PodiumWinnerTeam).ToUpperInvariant()} WINS"
+                            : "SHOWCASE",
                         RetrowaveMatchPhase.MatchComplete => "COMPLETE",
                         RetrowaveMatchPhase.Countdown => Mathf.CeilToInt(matchManager.CountdownTimeRemaining).ToString(),
                         _ => FormatRoundClock(matchManager.RoundTimeRemaining),
@@ -1883,7 +1889,7 @@ namespace RetrowaveRocket
 
             if (_gameplayHudCountdownRoot != null)
             {
-                _gameplayHudCountdownRoot.SetActive(matchManager != null && (matchManager.IsCountdown || matchManager.IsPodium) && !_goalCelebrationVisible);
+                _gameplayHudCountdownRoot.SetActive(matchManager != null && matchManager.IsCountdown && !_goalCelebrationVisible);
             }
 
             if (matchManager != null && matchManager.IsCountdown)
@@ -1900,22 +1906,6 @@ namespace RetrowaveRocket
                 if (_hudCountdownValueText != null)
                 {
                     _hudCountdownValueText.text = countdownValue <= 0 ? "GO" : countdownValue.ToString();
-                }
-            }
-            else if (matchManager != null && matchManager.IsPodium)
-            {
-                var podiumSeconds = Mathf.CeilToInt(matchManager.PodiumTimeRemaining);
-
-                if (_hudCountdownLabelText != null)
-                {
-                    _hudCountdownLabelText.text = matchManager.HasPodiumWinner
-                        ? $"{GetTeamLabel(matchManager.PodiumWinnerTeam).ToUpperInvariant()} PODIUM"
-                        : "DRAW SHOWCASE";
-                }
-
-                if (_hudCountdownValueText != null)
-                {
-                    _hudCountdownValueText.text = $"{podiumSeconds}s";
                 }
             }
         }
@@ -2011,7 +2001,7 @@ namespace RetrowaveRocket
                 ? "Draw"
                 : (matchManager.BlueScore > matchManager.PinkScore ? "Blue wins" : "Pink wins");
 
-            return $"{winner}\nBlue {matchManager.BlueScore}  -  {matchManager.PinkScore} Pink\nRounds played: {matchManager.RoundCount}\n\nPlayers can change teams now. The host controls the next game.";
+            return $"{winner}\nBlue {matchManager.BlueScore}  -  {matchManager.PinkScore} Pink\nRounds played: {matchManager.RoundCount}\nTeams are unlocked for the next match.";
         }
 
         private void ResetHudInfoIntroState()
@@ -2251,7 +2241,23 @@ namespace RetrowaveRocket
                     new Vector3(RetrowavePodiumLayout.GetPlatformScale(rank).x + 0.18f, 0.08f, 0.12f),
                     trimMaterial);
                 trim.transform.SetParent(_podiumPresentationRoot.transform, true);
+
+                CreatePodiumText(
+                    _podiumPresentationRoot.transform,
+                    $"Rank {rank + 1} Placement Label",
+                    RetrowavePodiumLayout.GetPlacementLabel(rank),
+                    RetrowavePodiumLayout.GetPlacementLabelPosition(rank),
+                    1.18f,
+                    Color.Lerp(glowColor, Color.white, 0.32f));
             }
+
+            CreatePodiumText(
+                _podiumPresentationRoot.transform,
+                "Winning Team Lineup Label",
+                hasWinner ? "WINNING TEAM LINEUP" : "SHOWCASE LINEUP",
+                RetrowavePodiumLayout.LineupLabelPosition,
+                0.78f,
+                Color.Lerp(glowColor, Color.white, 0.22f));
 
             var titleObject = new GameObject("Podium Title", typeof(TextMeshPro));
             titleObject.transform.SetParent(_podiumPresentationRoot.transform, false);
@@ -2294,6 +2300,26 @@ namespace RetrowaveRocket
             }
 
             return primitive;
+        }
+
+        private static TextMeshPro CreatePodiumText(Transform parent, string name, string value, Vector3 position, float fontSize, Color color)
+        {
+            var textObject = new GameObject(name, typeof(TextMeshPro));
+            textObject.transform.SetParent(parent, false);
+            textObject.transform.SetPositionAndRotation(position, RetrowavePodiumLayout.LabelRotation);
+
+            var text = textObject.GetComponent<TextMeshPro>();
+            text.font = TMP_Settings.defaultFontAsset;
+            text.fontSize = fontSize;
+            text.fontStyle = FontStyles.Bold;
+            text.alignment = TextAlignmentOptions.Center;
+            text.textWrappingMode = TextWrappingModes.NoWrap;
+            text.overflowMode = TextOverflowModes.Overflow;
+            text.text = value;
+            text.color = color;
+            text.outlineColor = new Color(0f, 0f, 0f, 0.78f);
+            text.outlineWidth = 0.18f;
+            return text;
         }
 
         private void ClearPodiumPresentation()
@@ -2340,6 +2366,66 @@ namespace RetrowaveRocket
             return gameObject;
         }
 
+        private void ApplyGameplayMenuLayout(bool matchComplete)
+        {
+            if (_gameplayMenuPanelRect == null)
+            {
+                return;
+            }
+
+            if (matchComplete)
+            {
+                _gameplayMenuPanelRect.sizeDelta = new Vector2(760f, 660f);
+                SetMenuTextLayout(_gameplayMenuTitleText, new Vector2(0f, 284f), new Vector2(640f, 42f), 34f);
+                SetMenuTextLayout(_gameplayMenuBodyText, new Vector2(0f, 211f), new Vector2(650f, 96f), 18f);
+                SetMenuTextLayout(_gameplayMenuHintText, new Vector2(0f, 139f), new Vector2(650f, 42f), 16f);
+                SetMenuTextLayout(_gameplayMenuFooterText, new Vector2(0f, -214f), new Vector2(650f, 42f), 15f);
+                SetMenuButtonLayout(_gameplayBlueButton, new Vector2(0f, 72f), new Vector2(380f, 52f));
+                SetMenuButtonLayout(_gameplayPinkButton, new Vector2(0f, 0f), new Vector2(380f, 52f));
+                SetMenuButtonLayout(_gameplaySpectateButton, new Vector2(0f, -72f), new Vector2(380f, 52f));
+                SetMenuButtonLayout(_gameplayStartButton, new Vector2(0f, -148f), new Vector2(380f, 52f));
+                SetMenuButtonLayout(_gameplayResumeButton, new Vector2(0f, -286f), new Vector2(380f, 52f));
+                SetMenuButtonLayout(_gameplayReturnButton, new Vector2(0f, -286f), new Vector2(380f, 52f));
+                return;
+            }
+
+            _gameplayMenuPanelRect.sizeDelta = new Vector2(700f, 560f);
+            SetMenuTextLayout(_gameplayMenuTitleText, new Vector2(0f, 224f), new Vector2(580f, 42f), 32f);
+            SetMenuTextLayout(_gameplayMenuBodyText, new Vector2(0f, 164f), new Vector2(590f, 68f), 18f);
+            SetMenuTextLayout(_gameplayMenuHintText, new Vector2(0f, 106f), new Vector2(590f, 44f), 16f);
+            SetMenuTextLayout(_gameplayMenuFooterText, new Vector2(0f, -202f), new Vector2(590f, 52f), 15f);
+            SetMenuButtonLayout(_gameplayBlueButton, new Vector2(0f, 48f), new Vector2(320f, 52f));
+            SetMenuButtonLayout(_gameplayPinkButton, new Vector2(0f, -20f), new Vector2(320f, 52f));
+            SetMenuButtonLayout(_gameplaySpectateButton, new Vector2(0f, -88f), new Vector2(320f, 52f));
+            SetMenuButtonLayout(_gameplayStartButton, new Vector2(0f, -164f), new Vector2(320f, 52f));
+            SetMenuButtonLayout(_gameplayResumeButton, new Vector2(-132f, -242f), new Vector2(320f, 52f));
+            SetMenuButtonLayout(_gameplayReturnButton, new Vector2(132f, -242f), new Vector2(320f, 52f));
+        }
+
+        private static void SetMenuTextLayout(TMP_Text text, Vector2 anchoredPosition, Vector2 size, float fontSize)
+        {
+            if (text == null)
+            {
+                return;
+            }
+
+            text.rectTransform.anchoredPosition = anchoredPosition;
+            text.rectTransform.sizeDelta = size;
+            text.fontSize = fontSize;
+        }
+
+        private static void SetMenuButtonLayout(Button button, Vector2 anchoredPosition, Vector2 size)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            var rect = button.GetComponent<RectTransform>();
+            rect.anchoredPosition = anchoredPosition;
+            rect.sizeDelta = size;
+        }
+
         private TMP_Text CreateMenuText(Transform parent, string name, float fontSize, FontStyles fontStyle, Vector2 anchoredPosition, Vector2 size, Color color)
         {
             var textObject = CreateUiObject(name, parent, typeof(RectTransform), typeof(TextMeshProUGUI));
@@ -2357,6 +2443,7 @@ namespace RetrowaveRocket
             text.color = color;
             text.alignment = TextAlignmentOptions.Center;
             text.textWrappingMode = TextWrappingModes.Normal;
+            text.overflowMode = TextOverflowModes.Truncate;
             text.text = string.Empty;
             return text;
         }
