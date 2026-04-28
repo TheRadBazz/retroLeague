@@ -719,6 +719,10 @@ namespace RetrowaveRocket
     {
         private const float GoalRampClearance = 1.25f;
         private const string MapMagicGrassLayerResourcePath = "RetrowaveRocket/MapMagicGrassGreen";
+        private const string YughuesRampMaterialName = "M_YFMeM_23";
+        private const string YughuesRampMaterialAssetPath = "Assets/YughuesFreeMetalMaterials/Materials/M_YFMeM_23.mat";
+        private const string YughuesRampMaterialResourcePath = "RetrowaveRocket/M_YFMeM_23_Ramp";
+        private const float YughuesRampTextureTiling = 5.5f;
         private static GameObject _arenaRoot;
         private static int _builtLayoutSignature = int.MinValue;
         private static PhysicsMaterial _perimeterBounceMaterial;
@@ -793,11 +797,7 @@ namespace RetrowaveRocket
             meshRenderer.sharedMaterials = new[]
             {
                 CreateMapMagicGrassPitchMaterial(),
-                RetrowaveStyle.CreateLitMaterial(
-                    new Color(0.018f, 0.035f, 0.08f),
-                    new Color(0.04f, 0.34f, 0.42f),
-                    0.82f,
-                    0.02f),
+                CreatePerimeterRampMaterial(),
             };
 
             var underlay = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -830,6 +830,59 @@ namespace RetrowaveRocket
                 new Color(0.32f, 0.72f, 0.28f, 1f),
                 new Color(0.02f, 0.08f, 0.025f),
                 0.08f);
+        }
+
+        private static Material CreatePerimeterRampMaterial()
+        {
+            var sourceMaterial = LoadYughuesRampMaterial();
+
+            if (sourceMaterial != null)
+            {
+                var rampMaterial = new Material(sourceMaterial)
+                {
+                    name = $"{YughuesRampMaterialName} Runtime Ramp",
+                };
+
+                ApplyRampTextureScale(rampMaterial, new Vector2(YughuesRampTextureTiling, YughuesRampTextureTiling));
+                return rampMaterial;
+            }
+
+            Debug.LogWarning($"RetrowaveArenaBuilder: {YughuesRampMaterialName} was not found. Using fallback perimeter ramp material.");
+            return RetrowaveStyle.CreateLitMaterial(
+                new Color(0.018f, 0.035f, 0.08f),
+                new Color(0.04f, 0.34f, 0.42f),
+                0.82f,
+                0.02f);
+        }
+
+        private static Material LoadYughuesRampMaterial()
+        {
+#if UNITY_EDITOR
+            var editorMaterial = UnityEditor.AssetDatabase.LoadAssetAtPath<Material>(YughuesRampMaterialAssetPath);
+
+            if (editorMaterial != null)
+            {
+                return editorMaterial;
+            }
+#endif
+
+            return Resources.Load<Material>(YughuesRampMaterialResourcePath);
+        }
+
+        private static void ApplyRampTextureScale(Material material, Vector2 scale)
+        {
+            SetTextureScale(material, "_BaseMap", scale);
+            SetTextureScale(material, "_MainTex", scale);
+            SetTextureScale(material, "_BumpMap", scale);
+            SetTextureScale(material, "_SpecGlossMap", scale);
+        }
+
+        private static void SetTextureScale(Material material, string propertyName, Vector2 scale)
+        {
+            if (material.HasProperty(propertyName))
+            {
+                material.SetTextureScale(propertyName, scale);
+            }
         }
 
         private static Mesh GenerateArenaMesh(int widthSegments, int lengthSegments)

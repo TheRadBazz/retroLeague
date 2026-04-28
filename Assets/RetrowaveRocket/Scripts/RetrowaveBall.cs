@@ -41,7 +41,7 @@ namespace RetrowaveRocket
             _glow = glowObject.AddComponent<Light>();
             _glow.type = LightType.Point;
             _glow.range = 10f;
-            _glow.color = new Color(0.45f, 0.8f, 1f);
+            _glow.color = Color.white;
             _glow.intensity = 5f;
         }
 

@@ -177,7 +177,7 @@ namespace RetrowaveRocket
         {
             _instance = this;
             _camera = GetComponent<Camera>();
-            _camera.clearFlags = CameraClearFlags.SolidColor;
+            _camera.clearFlags = CameraClearFlags.Skybox;
             _camera.backgroundColor = new Color(0.03f, 0.01f, 0.08f);
             _camera.fieldOfView = BaseFieldOfView;
             ShowOverview();
@@ -340,6 +340,7 @@ namespace RetrowaveRocket
             }
 
             var layout = RetrowaveArenaConfig.CurrentLayout;
+            _camera.clearFlags = CameraClearFlags.Skybox;
             _camera.farClipPlane = Mathf.Max(400f, layout.OuterHalfLength * 4.2f);
         }
 

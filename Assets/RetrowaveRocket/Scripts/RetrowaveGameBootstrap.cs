@@ -62,6 +62,12 @@ namespace RetrowaveRocket
         public const string MainMenuSceneName = "MainMenu";
         public const string GameplaySceneName = "SampleScene";
         private const string SportCarResourcePath = "RetrowaveRocket/SportCar_5";
+        private const string YughuesBallMaterialName = "M_YFMeM_49";
+        private const string YughuesBallMaterialAssetPath = "Assets/YughuesFreeMetalMaterials/Materials/M_YFMeM_49.mat";
+        private const string YughuesBallMaterialResourcePath = "RetrowaveRocket/M_YFMeM_49_Ball";
+        private const float YughuesBallTextureTiling = 2.2f;
+        private static readonly Color BallSurfaceTint = new Color(0.66f, 0.7f, 0.76f, 1f);
+        private static readonly Color BallSurfaceEmission = new Color(0.9f, 0.9f, 0.9f, 1f);
 
         private static RetrowaveGameBootstrap _instance;
         private static readonly FieldInfo GlobalObjectIdHashField = typeof(NetworkObject).GetField("GlobalObjectIdHash", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -3275,13 +3281,88 @@ namespace RetrowaveRocket
             prefab.AddComponent<NetworkTransform>();
             prefab.AddComponent<NetworkRigidbody>();
             prefab.AddComponent<RetrowaveBall>();
-            prefab.GetComponent<MeshRenderer>().sharedMaterial = RetrowaveStyle.CreateLitMaterial(
-                new Color(0.95f, 0.85f, 0.98f),
-                new Color(0.45f, 0.7f, 1f) * 2.7f,
-                0.95f,
-                0.02f);
+            prefab.GetComponent<MeshRenderer>().sharedMaterial = CreateBallSurfaceMaterial();
             FinalizeRuntimePrefab(prefab, 0xA1000002u, isTemplate);
             return prefab;
+        }
+
+        private static Material CreateBallSurfaceMaterial()
+        {
+            var sourceMaterial = LoadYughuesBallMaterial();
+
+            if (sourceMaterial != null)
+            {
+                var ballMaterial = new Material(sourceMaterial)
+                {
+                    name = $"{YughuesBallMaterialName} Runtime Ball",
+                };
+
+                ApplyBallMaterialGlow(ballMaterial);
+                ApplyMaterialTextureScale(ballMaterial, new Vector2(YughuesBallTextureTiling, YughuesBallTextureTiling));
+                return ballMaterial;
+            }
+
+            Debug.LogWarning($"RetrowaveGameBootstrap: {YughuesBallMaterialName} was not found. Using fallback glowing ball material.");
+            return RetrowaveStyle.CreateLitMaterial(
+                BallSurfaceTint,
+                BallSurfaceEmission * 1.3f,
+                0.95f,
+                0.02f);
+        }
+
+        private static Material LoadYughuesBallMaterial()
+        {
+#if UNITY_EDITOR
+            var editorMaterial = UnityEditor.AssetDatabase.LoadAssetAtPath<Material>(YughuesBallMaterialAssetPath);
+
+            if (editorMaterial != null)
+            {
+                return editorMaterial;
+            }
+#endif
+
+            return Resources.Load<Material>(YughuesBallMaterialResourcePath);
+        }
+
+        private static void ApplyBallMaterialGlow(Material material)
+        {
+            material.EnableKeyword("_EMISSION");
+            SetMaterialColor(material, "_BaseColor", BallSurfaceTint);
+            SetMaterialColor(material, "_Color", BallSurfaceTint);
+            SetMaterialColor(material, "_EmissionColor", BallSurfaceEmission);
+            SetMaterialFloat(material, "_Smoothness", 0.96f);
+        }
+
+        private static void ApplyMaterialTextureScale(Material material, Vector2 scale)
+        {
+            SetMaterialTextureScale(material, "_BaseMap", scale);
+            SetMaterialTextureScale(material, "_MainTex", scale);
+            SetMaterialTextureScale(material, "_BumpMap", scale);
+            SetMaterialTextureScale(material, "_SpecGlossMap", scale);
+        }
+
+        private static void SetMaterialColor(Material material, string propertyName, Color color)
+        {
+            if (material.HasProperty(propertyName))
+            {
+                material.SetColor(propertyName, color);
+            }
+        }
+
+        private static void SetMaterialFloat(Material material, string propertyName, float value)
+        {
+            if (material.HasProperty(propertyName))
+            {
+                material.SetFloat(propertyName, value);
+            }
+        }
+
+        private static void SetMaterialTextureScale(Material material, string propertyName, Vector2 scale)
+        {
+            if (material.HasProperty(propertyName))
+            {
+                material.SetTextureScale(propertyName, scale);
+            }
         }
 
         private static GameObject CreatePowerUpPrefab(bool isTemplate = true)
