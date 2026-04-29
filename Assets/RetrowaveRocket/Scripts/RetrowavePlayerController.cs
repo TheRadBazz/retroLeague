@@ -15,6 +15,7 @@ namespace RetrowaveRocket
         public bool Boost;
         public bool Brake;
         public bool JumpPressed;
+        public bool JumpHeld;
         public bool ResetPressed;
 
         public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
@@ -25,6 +26,7 @@ namespace RetrowaveRocket
             serializer.SerializeValue(ref Boost);
             serializer.SerializeValue(ref Brake);
             serializer.SerializeValue(ref JumpPressed);
+            serializer.SerializeValue(ref JumpHeld);
             serializer.SerializeValue(ref ResetPressed);
         }
 
@@ -36,6 +38,7 @@ namespace RetrowaveRocket
                    && Boost == other.Boost
                    && Brake == other.Brake
                    && JumpPressed == other.JumpPressed
+                   && JumpHeld == other.JumpHeld
                    && ResetPressed == other.ResetPressed;
         }
     }
@@ -64,9 +67,12 @@ namespace RetrowaveRocket
         private const float GroundSteeringTorque = 14.5f;
         private const float GroundAlignTorque = 36f;
         private const float GroundAngularDamping = 4.6f;
+        private const float GroundYawActiveDamping = 1.4f;
+        private const float GroundYawReleaseDamping = 7.2f;
         private const float GroundDrag = 1.45f;
         private const float GroundStickForce = 13f;
         private const float JumpImpulse = 9.35f;
+        private const float JumpBoostCost = 10f;
         private const float AirPitchTorque = 12.5f;
         private const float AirYawTorque = 11f;
         private const float AirRollTorque = 13.5f;
@@ -79,8 +85,16 @@ namespace RetrowaveRocket
         private const float AirYawStabilizeTorque = 2.6f;
         private const float AirLateralDamping = 0.55f;
         private const float AirGravityAssist = 4.5f;
+        private const float GlideBoostDrain = 18f;
+        private const float GlideForwardAcceleration = 8.5f;
+        private const float GlideSteerAcceleration = 5.5f;
+        private const float GlideVerticalAssist = 9.5f;
+        private const float GlideMaxFallSpeed = 5.2f;
+        private const float GlideActivationMaxUpwardSpeed = 0.2f;
         private const float GroundVelocityTurnAssist = 5.2f;
         private const float BoostForce = 34f;
+        private const float BoostDrainRate = 28f;
+        private const float BoostRechargeDelaySeconds = 1.25f;
         private const float MaxDriveSpeed = 29f;
         private const float MaxReverseSpeed = 15f;
         private const float MaxBoostSpeed = 38f;
@@ -140,7 +154,10 @@ namespace RetrowaveRocket
         private float _cachedRoll;
         private bool _cachedBoost;
         private bool _cachedBrake;
+        private bool _cachedJumpHeld;
         private bool _boostRequiresRelease;
+        private bool _glideRequiresRelease;
+        private float _boostRechargeDelayTimer;
         private bool _isGrounded;
         private Vector3 _groundNormal = Vector3.up;
         private float _coyoteTimer;
@@ -230,6 +247,7 @@ namespace RetrowaveRocket
                     Boost = _cachedBoost,
                     Brake = _cachedBrake,
                     JumpPressed = _jumpQueued,
+                    JumpHeld = _cachedJumpHeld,
                     ResetPressed = _resetQueued,
                 };
 
@@ -380,6 +398,8 @@ namespace RetrowaveRocket
             _groundProbeCount = 0;
             _coyoteTimer = 0f;
             _boostRequiresRelease = false;
+            _glideRequiresRelease = false;
+            _boostRechargeDelayTimer = 0f;
         }
 
         public void SetPodiumPresentationServer(Vector3 position, Quaternion rotation, bool isVisible)
@@ -400,6 +420,8 @@ namespace RetrowaveRocket
             _latestInput = default;
             _boostFx.Value = false;
             _boostRequiresRelease = false;
+            _glideRequiresRelease = false;
+            _boostRechargeDelayTimer = 0f;
         }
 
         public void SetSpectatorStateServer(bool hasSelectedRole)
@@ -426,6 +448,8 @@ namespace RetrowaveRocket
             _latestInput = default;
             _boostFx.Value = false;
             _boostRequiresRelease = false;
+            _glideRequiresRelease = false;
+            _boostRechargeDelayTimer = 0f;
         }
 
         public void RequestRoleSelection(RetrowaveLobbyRole role)
@@ -449,6 +473,7 @@ namespace RetrowaveRocket
             {
                 case RetrowavePowerUpType.BoostRefill:
                     _boostAmount.Value = RetrowaveArenaConfig.MaxBoost;
+                    _boostRechargeDelayTimer = 0f;
                     break;
                 case RetrowavePowerUpType.SpeedBurst:
                     _speedBoostTimer.Value = RetrowaveArenaConfig.SpeedBurstDuration;
@@ -472,9 +497,11 @@ namespace RetrowaveRocket
                 _cachedRoll = 0f;
                 _cachedBoost = false;
                 _cachedBrake = false;
+                _cachedJumpHeld = false;
                 _jumpQueued = false;
                 _resetQueued = false;
                 _boostRequiresRelease = false;
+                _glideRequiresRelease = false;
                 return;
             }
 
@@ -486,6 +513,7 @@ namespace RetrowaveRocket
             var keyboardRoll = 0f;
             var keyboardBoost = false;
             var keyboardBrake = false;
+            var keyboardJumpHeld = false;
 
             if (keyboard != null)
             {
@@ -497,6 +525,7 @@ namespace RetrowaveRocket
                 keyboardRoll -= RetrowaveInputBindings.IsPressed(keyboard, RetrowaveBindingAction.AirRollLeft) ? 1f : 0f;
                 keyboardBoost = RetrowaveInputBindings.IsPressed(keyboard, RetrowaveBindingAction.Boost);
                 keyboardBrake = RetrowaveInputBindings.IsPressed(keyboard, RetrowaveBindingAction.Brake);
+                keyboardJumpHeld = RetrowaveInputBindings.IsPressed(keyboard, RetrowaveBindingAction.Jump);
 
                 if (RetrowaveInputBindings.WasPressedThisFrame(keyboard, RetrowaveBindingAction.Jump))
                 {
@@ -514,6 +543,7 @@ namespace RetrowaveRocket
             _cachedRoll = keyboardRoll;
             _cachedBoost = keyboardBoost;
             _cachedBrake = keyboardBrake;
+            _cachedJumpHeld = keyboardJumpHeld;
 
             if (gamepad != null)
             {
@@ -527,6 +557,7 @@ namespace RetrowaveRocket
                 _cachedRoll = Mathf.Abs(shoulderRoll) > Mathf.Abs(_cachedRoll) ? shoulderRoll : _cachedRoll;
                 _cachedBoost |= gamepad.rightTrigger.ReadValue() > 0.35f;
                 _cachedBrake |= gamepad.leftTrigger.ReadValue() > 0.35f;
+                _cachedJumpHeld |= gamepad.buttonSouth.isPressed;
 
                 if (gamepad.buttonSouth.wasPressedThisFrame)
                 {
@@ -543,7 +574,7 @@ namespace RetrowaveRocket
             {
                 _boostRequiresRelease = false;
             }
-            else if (_boostRequiresRelease || _boostAmount.Value <= 0.01f)
+            else if (_boostRequiresRelease || _boostAmount.Value <= BoostStartThreshold)
             {
                 _cachedBoost = false;
                 _boostRequiresRelease = true;
@@ -560,12 +591,29 @@ namespace RetrowaveRocket
                 _speedBoostTimer.Value = Mathf.Max(0f, _speedBoostTimer.Value - Time.fixedDeltaTime);
             }
 
-            _boostAmount.Value = Mathf.Clamp(
-                _boostAmount.Value + RetrowaveArenaConfig.PassiveBoostRegen * Time.fixedDeltaTime,
-                0f,
-                RetrowaveArenaConfig.MaxBoost);
+            if (_boostRechargeDelayTimer > 0f)
+            {
+                _boostRechargeDelayTimer = Mathf.Max(0f, _boostRechargeDelayTimer - Time.fixedDeltaTime);
+            }
+            else
+            {
+                _boostAmount.Value = Mathf.Clamp(
+                    _boostAmount.Value + RetrowaveArenaConfig.PassiveBoostRegen * Time.fixedDeltaTime,
+                    0f,
+                    RetrowaveArenaConfig.MaxBoost);
+            }
+
+            if (!input.Boost)
+            {
+                _boostRequiresRelease = false;
+            }
 
             var treatedAsGrounded = _isGrounded || _coyoteTimer > 0f;
+
+            if (treatedAsGrounded || !input.JumpHeld)
+            {
+                _glideRequiresRelease = false;
+            }
 
             if (treatedAsGrounded)
             {
@@ -577,22 +625,29 @@ namespace RetrowaveRocket
             }
 
             HandleJump(input, treatedAsGrounded);
+            var isGliding = !treatedAsGrounded && TryApplyGlide(input);
 
-            var isBoosting = input.Boost && _boostAmount.Value > BoostStartThreshold;
+            if (input.Boost && _boostAmount.Value <= BoostStartThreshold)
+            {
+                _boostRequiresRelease = true;
+            }
+
+            var isBoosting = input.Boost && !_boostRequiresRelease && _boostAmount.Value > BoostStartThreshold;
 
             if (isBoosting)
             {
                 ApplyBoost(treatedAsGrounded);
-                _boostAmount.Value = Mathf.Max(0f, _boostAmount.Value - 28f * Time.fixedDeltaTime);
+                SpendBoost(BoostDrainRate * Time.fixedDeltaTime);
 
-                if (_boostAmount.Value <= 0.01f)
+                if (_boostAmount.Value <= BoostStartThreshold)
                 {
+                    DepleteBoost();
                     isBoosting = false;
                     _boostRequiresRelease = true;
                 }
             }
 
-            _boostFx.Value = isBoosting;
+            _boostFx.Value = isBoosting || isGliding;
 
             if (input.ResetPressed || !RetrowaveArenaConfig.IsWithinArenaRecoveryBounds(transform.position))
             {
@@ -716,6 +771,10 @@ namespace RetrowaveRocket
             _rigidbody.AddTorque(transform.right * (-localAngularVelocity.x * GroundAngularDamping), ForceMode.Acceleration);
             _rigidbody.AddTorque(transform.forward * (-localAngularVelocity.z * GroundAngularDamping), ForceMode.Acceleration);
 
+            var groundYawVelocity = Vector3.Dot(_rigidbody.angularVelocity, _groundNormal);
+            var yawDamping = Mathf.Abs(input.Steer) > 0.02f ? GroundYawActiveDamping : GroundYawReleaseDamping;
+            _rigidbody.AddTorque(_groundNormal * (-groundYawVelocity * yawDamping), ForceMode.Acceleration);
+
             if (input.Brake)
             {
                 _rigidbody.AddForce(-planarVelocity * 2.6f, ForceMode.Acceleration);
@@ -759,6 +818,13 @@ namespace RetrowaveRocket
                 return;
             }
 
+            if (_boostAmount.Value < JumpBoostCost)
+            {
+                return;
+            }
+
+            SpendBoost(JumpBoostCost);
+
             if (treatedAsGrounded)
             {
                 _rigidbody.AddForce(transform.up * JumpImpulse, ForceMode.VelocityChange);
@@ -769,6 +835,61 @@ namespace RetrowaveRocket
             }
 
             _rigidbody.AddForce(transform.up * AirHoverBurst, ForceMode.VelocityChange);
+        }
+
+        private bool TryApplyGlide(RetrowavePlayerInputState input)
+        {
+            if (!input.JumpHeld || _glideRequiresRelease)
+            {
+                return false;
+            }
+
+            if (_boostAmount.Value <= BoostStartThreshold)
+            {
+                _glideRequiresRelease = true;
+                return false;
+            }
+
+            var verticalVelocity = Vector3.Dot(_rigidbody.linearVelocity, Vector3.up);
+
+            if (verticalVelocity > GlideActivationMaxUpwardSpeed)
+            {
+                return false;
+            }
+
+            var glideForward = Vector3.ProjectOnPlane(transform.forward, Vector3.up);
+
+            if (glideForward.sqrMagnitude > 0.001f)
+            {
+                _rigidbody.AddForce(glideForward.normalized * GlideForwardAcceleration, ForceMode.Acceleration);
+            }
+
+            var glideRight = Vector3.ProjectOnPlane(transform.right, Vector3.up);
+
+            if (glideRight.sqrMagnitude > 0.001f && Mathf.Abs(input.Steer) > 0.02f)
+            {
+                _rigidbody.AddForce(glideRight.normalized * (input.Steer * GlideSteerAcceleration), ForceMode.Acceleration);
+            }
+
+            if (verticalVelocity < -GlideMaxFallSpeed)
+            {
+                _rigidbody.AddForce(Vector3.up * (-GlideMaxFallSpeed - verticalVelocity), ForceMode.VelocityChange);
+            }
+
+            if (verticalVelocity <= 0f)
+            {
+                _rigidbody.AddForce(Vector3.up * GlideVerticalAssist, ForceMode.Acceleration);
+            }
+
+            SpendBoost(GlideBoostDrain * Time.fixedDeltaTime);
+
+            if (_boostAmount.Value <= BoostStartThreshold)
+            {
+                DepleteBoost();
+                _glideRequiresRelease = true;
+            }
+
+            return true;
         }
 
         private void ApplyBoost(bool treatedAsGrounded)
@@ -783,6 +904,29 @@ namespace RetrowaveRocket
             }
 
             _rigidbody.AddForce(forceDirection * BoostForce, ForceMode.Acceleration);
+        }
+
+        private void SpendBoost(float amount)
+        {
+            if (amount <= 0f)
+            {
+                return;
+            }
+
+            var previousBoost = _boostAmount.Value;
+            _boostAmount.Value = Mathf.Max(0f, _boostAmount.Value - amount);
+
+            if (previousBoost > 0f && _boostAmount.Value <= 0.01f)
+            {
+                _boostAmount.Value = 0f;
+                _boostRechargeDelayTimer = BoostRechargeDelaySeconds;
+            }
+        }
+
+        private void DepleteBoost()
+        {
+            _boostAmount.Value = 0f;
+            _boostRechargeDelayTimer = BoostRechargeDelaySeconds;
         }
 
         private void HandleTeamChanged(int _, int nextValue)
