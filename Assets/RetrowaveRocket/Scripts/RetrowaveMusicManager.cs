@@ -44,6 +44,7 @@ namespace RetrowaveRocket
 
             _instance = this;
             DontDestroyOnLoad(gameObject);
+            RetrowaveGameSettings.SettingsApplied += HandleSettingsApplied;
             _profile = _assignedProfile != null
                 ? _assignedProfile
                 : Resources.Load<RetrowaveMusicProfile>(ProfileResourcePath);
@@ -57,6 +58,14 @@ namespace RetrowaveRocket
                 source.ignoreListenerPause = true;
                 source.volume = 0f;
                 _sources[i] = source;
+            }
+        }
+
+        private void OnDestroy()
+        {
+            if (_instance == this)
+            {
+                RetrowaveGameSettings.SettingsApplied -= HandleSettingsApplied;
             }
         }
 
@@ -84,6 +93,7 @@ namespace RetrowaveRocket
 
             if (cue == null || cue.Loop || _sources[_activeSourceIndex].isPlaying)
             {
+                RefreshActiveSourceVolume();
                 return;
             }
 
@@ -150,7 +160,7 @@ namespace RetrowaveRocket
 
             _activeContext = context;
             _activeClip = nextClip;
-            CrossfadeTo(nextClip, cue.Loop, cue.Volume * _profile.MasterVolume);
+            CrossfadeTo(nextClip, cue.Loop, ResolveTargetVolume(cue));
         }
 
         private void CrossfadeTo(AudioClip clip, bool loop, float targetVolume)
@@ -243,6 +253,35 @@ namespace RetrowaveRocket
             source.clip = null;
             source.volume = 0f;
             _fadeRoutine = null;
+        }
+
+        private void HandleSettingsApplied()
+        {
+            RefreshActiveSourceVolume();
+        }
+
+        private void RefreshActiveSourceVolume()
+        {
+            if (_profile == null || _activeContext == RetrowaveMusicContext.None || _fadeRoutine != null)
+            {
+                return;
+            }
+
+            var cue = _profile.GetCue(_activeContext);
+
+            if (cue == null || _sources[_activeSourceIndex] == null)
+            {
+                return;
+            }
+
+            _sources[_activeSourceIndex].volume = ResolveTargetVolume(cue);
+        }
+
+        private float ResolveTargetVolume(RetrowaveMusicCue cue)
+        {
+            return cue == null
+                ? 0f
+                : cue.Volume * _profile.MasterVolume * RetrowaveGameSettings.MusicVolume;
         }
     }
 }

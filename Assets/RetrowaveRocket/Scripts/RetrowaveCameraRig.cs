@@ -279,17 +279,24 @@ namespace RetrowaveRocket
             var mouse = Mouse.current;
             var gamepad = Gamepad.current;
             var orbitInput = Vector2.zero;
+            var invertLookMultiplier = RetrowaveGameSettings.InvertLook ? -1f : 1f;
 
             if (!gameplayBlocked)
             {
                 if (mouse != null)
                 {
-                    orbitInput += mouse.delta.ReadValue() * MouseOrbitSensitivity;
+                    var mouseDelta = mouse.delta.ReadValue();
+                    orbitInput += new Vector2(
+                        mouseDelta.x * MouseOrbitSensitivity * RetrowaveGameSettings.MouseSensitivityXMultiplier,
+                        mouseDelta.y * MouseOrbitSensitivity * RetrowaveGameSettings.MouseSensitivityYMultiplier * invertLookMultiplier);
                 }
 
                 if (gamepad != null)
                 {
-                    orbitInput += gamepad.rightStick.ReadValue() * (StickOrbitSensitivity * Time.deltaTime);
+                    var stickInput = gamepad.rightStick.ReadValue();
+                    orbitInput += new Vector2(
+                        stickInput.x * (StickOrbitSensitivity * RetrowaveGameSettings.StickSensitivityXMultiplier * Time.deltaTime),
+                        stickInput.y * (StickOrbitSensitivity * RetrowaveGameSettings.StickSensitivityYMultiplier * Time.deltaTime * invertLookMultiplier));
                 }
             }
 

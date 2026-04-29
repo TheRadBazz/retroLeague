@@ -157,6 +157,8 @@ namespace SlimUI.ModernMenu{
 		}
 
 		void DisablePanels(){
+			FindFirstObjectByType<UISettingsManager>()?.CloseRuntimeSettingsOverlays();
+
 			PanelControls.SetActive(false);
 			PanelVideo.SetActive(false);
 			PanelGame.SetActive(false);
@@ -195,9 +197,9 @@ namespace SlimUI.ModernMenu{
 
 		public void KeyBindingsPanel(){
 			DisablePanels();
-			MovementPanel();
 			PanelKeyBindings.SetActive(true);
 			lineKeyBindings.SetActive(true);
+			FindFirstObjectByType<UISettingsManager>()?.OpenKeyBindingsCanvas();
 		}
 
 		public void MovementPanel(){

@@ -489,21 +489,21 @@ namespace RetrowaveRocket
 
             if (keyboard != null)
             {
-                keyboardThrottle += keyboard.wKey.isPressed ? 1f : 0f;
-                keyboardThrottle -= keyboard.sKey.isPressed ? 1f : 0f;
-                keyboardSteer += keyboard.dKey.isPressed ? 1f : 0f;
-                keyboardSteer -= keyboard.aKey.isPressed ? 1f : 0f;
-                keyboardRoll += keyboard.eKey.isPressed ? 1f : 0f;
-                keyboardRoll -= keyboard.qKey.isPressed ? 1f : 0f;
-                keyboardBoost = keyboard.leftShiftKey.isPressed || keyboard.rightShiftKey.isPressed;
-                keyboardBrake = keyboard.leftCtrlKey.isPressed || keyboard.rightCtrlKey.isPressed;
+                keyboardThrottle += RetrowaveInputBindings.IsPressed(keyboard, RetrowaveBindingAction.DriveForward) ? 1f : 0f;
+                keyboardThrottle -= RetrowaveInputBindings.IsPressed(keyboard, RetrowaveBindingAction.DriveReverse) ? 1f : 0f;
+                keyboardSteer += RetrowaveInputBindings.IsPressed(keyboard, RetrowaveBindingAction.SteerRight) ? 1f : 0f;
+                keyboardSteer -= RetrowaveInputBindings.IsPressed(keyboard, RetrowaveBindingAction.SteerLeft) ? 1f : 0f;
+                keyboardRoll += RetrowaveInputBindings.IsPressed(keyboard, RetrowaveBindingAction.AirRollRight) ? 1f : 0f;
+                keyboardRoll -= RetrowaveInputBindings.IsPressed(keyboard, RetrowaveBindingAction.AirRollLeft) ? 1f : 0f;
+                keyboardBoost = RetrowaveInputBindings.IsPressed(keyboard, RetrowaveBindingAction.Boost);
+                keyboardBrake = RetrowaveInputBindings.IsPressed(keyboard, RetrowaveBindingAction.Brake);
 
-                if (keyboard.spaceKey.wasPressedThisFrame)
+                if (RetrowaveInputBindings.WasPressedThisFrame(keyboard, RetrowaveBindingAction.Jump))
                 {
                     _jumpQueued = true;
                 }
 
-                if (keyboard.rKey.wasPressedThisFrame)
+                if (RetrowaveInputBindings.WasPressedThisFrame(keyboard, RetrowaveBindingAction.ResetCar))
                 {
                     _resetQueued = true;
                 }

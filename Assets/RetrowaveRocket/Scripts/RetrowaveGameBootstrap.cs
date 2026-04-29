@@ -263,15 +263,15 @@ namespace RetrowaveRocket
             {
                 HandleRoleSelectionHotkeys(keyboard);
                 HandleSpectatorFollowHotkeys(keyboard);
-                _showScoreboard = keyboard.tabKey.isPressed;
+                _showScoreboard = RetrowaveInputBindings.IsPressed(keyboard, RetrowaveBindingAction.Scoreboard);
 
-                if (keyboard.hKey.wasPressedThisFrame)
+                if (RetrowaveInputBindings.WasPressedThisFrame(keyboard, RetrowaveBindingAction.ToggleMatchInfo))
                 {
                     _showHudInfoPanel = !_showHudInfoPanel;
                     _hudInfoIntroAutoHidePending = false;
                 }
 
-                if (keyboard.escapeKey.wasPressedThisFrame && !RequiresRoleSelection())
+                if (RetrowaveInputBindings.WasPressedThisFrame(keyboard, RetrowaveBindingAction.Pause) && !RequiresRoleSelection())
                 {
                     _showPauseMenu = !_showPauseMenu;
                 }
@@ -1553,7 +1553,8 @@ namespace RetrowaveRocket
 
             var isVisible = _networkManager != null
                             && _networkManager.IsListening
-                            && IsGameplayScene(SceneManager.GetActiveScene());
+                            && IsGameplayScene(SceneManager.GetActiveScene())
+                            && RetrowaveGameSettings.ShowHud;
             _gameplayHudRoot.SetActive(isVisible);
 
             if (!isVisible)
