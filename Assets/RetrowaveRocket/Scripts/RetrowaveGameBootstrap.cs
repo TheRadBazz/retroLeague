@@ -59,6 +59,14 @@ namespace RetrowaveRocket
             Client = 2,
         }
 
+        private enum GameplaySettingsTab
+        {
+            Game = 0,
+            Controls = 1,
+            Video = 2,
+            KeyBindings = 3,
+        }
+
         public const string MainMenuSceneName = "MainMenu";
         public const string GameplaySceneName = "SampleScene";
         private const string SportCarResourcePath = "RetrowaveRocket/SportCar_5";
@@ -106,9 +114,18 @@ namespace RetrowaveRocket
         private Button _gameplayResumeButton;
         private Button _gameplayStartButton;
         private Button _gameplayReturnButton;
+        private Button _gameplaySettingsButton;
         private TMP_Text _gameplayStartButtonLabel;
         private TMP_Text _gameplayReturnButtonLabel;
         private bool _gameplayMenuWasVisible;
+        private GameObject _gameplaySettingsRoot;
+        private RectTransform _gameplaySettingsPanelRect;
+        private RectTransform _gameplaySettingsContentHost;
+        private TMP_Text _gameplaySettingsStatusText;
+        private readonly Dictionary<GameplaySettingsTab, Image> _gameplaySettingsTabImages = new();
+        private readonly Dictionary<RetrowaveBindingAction, TMP_Text> _gameplaySettingsBindingValueTexts = new();
+        private GameplaySettingsTab _gameplaySettingsTab = GameplaySettingsTab.Game;
+        private RetrowaveBindingAction? _pendingGameplaySettingsBindingAction;
         private bool _showHudInfoPanel = true;
         private GameObject _gameplayHudRoot;
         private GameObject _gameplayHudInfoRoot;
@@ -234,6 +251,7 @@ namespace RetrowaveRocket
                 ClearGoalCelebrationState();
                 ClearPodiumPresentation();
                 SetGameplayMenuVisible(false);
+                CloseGameplaySettingsOverlay();
                 if (_gameplayHudRoot != null)
                 {
                     _gameplayHudRoot.SetActive(false);
@@ -249,6 +267,7 @@ namespace RetrowaveRocket
                 ClearGoalCelebrationState();
                 ClearPodiumPresentation();
                 SetGameplayMenuVisible(false);
+                CloseGameplaySettingsOverlay();
                 if (_gameplayHudRoot != null)
                 {
                     _gameplayHudRoot.SetActive(false);
@@ -261,19 +280,27 @@ namespace RetrowaveRocket
 
             if (keyboard != null)
             {
-                HandleRoleSelectionHotkeys(keyboard);
-                HandleSpectatorFollowHotkeys(keyboard);
-                _showScoreboard = RetrowaveInputBindings.IsPressed(keyboard, RetrowaveBindingAction.Scoreboard);
-
-                if (RetrowaveInputBindings.WasPressedThisFrame(keyboard, RetrowaveBindingAction.ToggleMatchInfo))
+                if (IsGameplaySettingsVisible())
                 {
-                    _showHudInfoPanel = !_showHudInfoPanel;
-                    _hudInfoIntroAutoHidePending = false;
+                    HandleGameplaySettingsKeyboard(keyboard);
+                    _showScoreboard = false;
                 }
-
-                if (RetrowaveInputBindings.WasPressedThisFrame(keyboard, RetrowaveBindingAction.Pause) && !RequiresRoleSelection())
+                else
                 {
-                    _showPauseMenu = !_showPauseMenu;
+                    HandleRoleSelectionHotkeys(keyboard);
+                    HandleSpectatorFollowHotkeys(keyboard);
+                    _showScoreboard = RetrowaveInputBindings.IsPressed(keyboard, RetrowaveBindingAction.Scoreboard);
+
+                    if (RetrowaveInputBindings.WasPressedThisFrame(keyboard, RetrowaveBindingAction.ToggleMatchInfo))
+                    {
+                        _showHudInfoPanel = !_showHudInfoPanel;
+                        _hudInfoIntroAutoHidePending = false;
+                    }
+
+                    if (RetrowaveInputBindings.WasPressedThisFrame(keyboard, RetrowaveBindingAction.Pause) && !RequiresRoleSelection())
+                    {
+                        _showPauseMenu = !_showPauseMenu;
+                    }
                 }
             }
 
@@ -353,6 +380,7 @@ namespace RetrowaveRocket
                 ClearGoalCelebrationState();
                 ClearPodiumPresentation();
                 DestroyGameplayMenuOverlay();
+                DestroyGameplaySettingsOverlay();
                 DestroyGameplayHudOverlay();
                 _instance = null;
             }
@@ -807,7 +835,9 @@ namespace RetrowaveRocket
             _gameplayStartButtonLabel = _gameplayStartButton.GetComponentInChildren<TextMeshProUGUI>(true);
             _gameplayResumeButton = CreateMenuButton(panel.transform, "ResumeButton", "Resume", new Vector2(-132f, -242f), new Color(0.12f, 0.24f, 0.36f, 1f), HandleGameplayResume);
             _gameplayReturnButton = CreateMenuButton(panel.transform, "ReturnButton", "Return To Main Menu", new Vector2(132f, -242f), new Color(0.26f, 0.12f, 0.16f, 1f), ReturnToMainMenu);
+            _gameplaySettingsButton = CreateMenuButton(panel.transform, "SettingsButton", "Settings", new Vector2(248f, 246f), new Color(0.17f, 0.24f, 0.38f, 1f), OpenGameplaySettingsOverlay);
             _gameplayReturnButtonLabel = _gameplayReturnButton.GetComponentInChildren<TextMeshProUGUI>(true);
+            SetMenuButtonLayout(_gameplaySettingsButton, new Vector2(248f, 246f), new Vector2(150f, 38f));
 
             SetGameplayMenuVisible(false);
         }
@@ -837,9 +867,11 @@ namespace RetrowaveRocket
             _gameplayResumeButton = null;
             _gameplayStartButton = null;
             _gameplayReturnButton = null;
+            _gameplaySettingsButton = null;
             _gameplayStartButtonLabel = null;
             _gameplayReturnButtonLabel = null;
             _gameplayMenuWasVisible = false;
+            DestroyGameplaySettingsOverlay();
         }
 
         private void EnsureGameplayEventSystem()
@@ -886,6 +918,7 @@ namespace RetrowaveRocket
             if (podiumActive)
             {
                 _showPauseMenu = false;
+                CloseGameplaySettingsOverlay();
             }
 
             var isVisible = _networkManager != null
@@ -938,6 +971,7 @@ namespace RetrowaveRocket
 
             _gameplayStartButton.gameObject.SetActive(hostIsPresent);
             _gameplayResumeButton.gameObject.SetActive(!forceSelection && !sessionBootstrapPending && !matchComplete);
+            _gameplaySettingsButton.gameObject.SetActive(!sessionBootstrapPending);
             ApplyGameplayMenuLayout(matchComplete);
 
             if (_gameplayStartButtonLabel != null && matchManager != null)
@@ -2393,6 +2427,7 @@ namespace RetrowaveRocket
                 SetMenuButtonLayout(_gameplayStartButton, new Vector2(0f, -148f), new Vector2(380f, 52f));
                 SetMenuButtonLayout(_gameplayResumeButton, new Vector2(0f, -286f), new Vector2(380f, 52f));
                 SetMenuButtonLayout(_gameplayReturnButton, new Vector2(0f, -286f), new Vector2(380f, 52f));
+                SetMenuButtonLayout(_gameplaySettingsButton, new Vector2(290f, 294f), new Vector2(150f, 38f));
                 return;
             }
 
@@ -2407,6 +2442,7 @@ namespace RetrowaveRocket
             SetMenuButtonLayout(_gameplayStartButton, new Vector2(0f, -164f), new Vector2(320f, 52f));
             SetMenuButtonLayout(_gameplayResumeButton, new Vector2(-132f, -242f), new Vector2(320f, 52f));
             SetMenuButtonLayout(_gameplayReturnButton, new Vector2(132f, -242f), new Vector2(320f, 52f));
+            SetMenuButtonLayout(_gameplaySettingsButton, new Vector2(250f, 244f), new Vector2(150f, 38f));
         }
 
         private static void SetMenuTextLayout(TMP_Text text, Vector2 anchoredPosition, Vector2 size, float fontSize)
@@ -2499,6 +2535,582 @@ namespace RetrowaveRocket
             labelText.alignment = TextAlignmentOptions.Center;
 
             return button;
+        }
+
+        private bool IsGameplaySettingsVisible()
+        {
+            return _gameplaySettingsRoot != null && _gameplaySettingsRoot.activeSelf;
+        }
+
+        private void HandleGameplaySettingsKeyboard(Keyboard keyboard)
+        {
+            if (_pendingGameplaySettingsBindingAction.HasValue)
+            {
+                if (RetrowaveInputBindings.TryGetPressedKeyThisFrame(keyboard, out var key))
+                {
+                    RetrowaveInputBindings.SetBinding(_pendingGameplaySettingsBindingAction.Value, key);
+                    _pendingGameplaySettingsBindingAction = null;
+                    RefreshGameplaySettingsBindingTexts();
+                    RefreshGameplaySettingsStatus();
+                }
+
+                return;
+            }
+
+            if (RetrowaveInputBindings.WasPressedThisFrame(keyboard, RetrowaveBindingAction.Pause))
+            {
+                CloseGameplaySettingsOverlay();
+            }
+        }
+
+        private void OpenGameplaySettingsOverlay()
+        {
+            EnsureGameplaySettingsOverlay();
+
+            if (_gameplaySettingsRoot == null)
+            {
+                return;
+            }
+
+            _pendingGameplaySettingsBindingAction = null;
+            _showPauseMenu = true;
+            _gameplaySettingsRoot.SetActive(true);
+            _gameplaySettingsRoot.transform.SetAsLastSibling();
+            RebuildGameplaySettingsContent();
+            RefreshGameplaySettingsStatus();
+        }
+
+        private void CloseGameplaySettingsOverlay()
+        {
+            _pendingGameplaySettingsBindingAction = null;
+
+            if (_gameplaySettingsRoot != null)
+            {
+                _gameplaySettingsRoot.SetActive(false);
+            }
+
+            RefreshGameplaySettingsStatus();
+        }
+
+        private void DestroyGameplaySettingsOverlay()
+        {
+            if (_gameplaySettingsRoot != null)
+            {
+                Destroy(_gameplaySettingsRoot);
+                _gameplaySettingsRoot = null;
+            }
+
+            _gameplaySettingsPanelRect = null;
+            _gameplaySettingsContentHost = null;
+            _gameplaySettingsStatusText = null;
+            _gameplaySettingsTabImages.Clear();
+            _gameplaySettingsBindingValueTexts.Clear();
+            _pendingGameplaySettingsBindingAction = null;
+        }
+
+        private void EnsureGameplaySettingsOverlay()
+        {
+            if (_gameplaySettingsRoot != null)
+            {
+                return;
+            }
+
+            EnsureGameplayEventSystem();
+            _gameplayMenuFont = TMP_Settings.defaultFontAsset;
+
+            _gameplaySettingsRoot = new GameObject("Retrowave Gameplay Settings", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
+            _gameplaySettingsRoot.transform.SetParent(transform, false);
+
+            var canvas = _gameplaySettingsRoot.GetComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = 260;
+
+            var scaler = _gameplaySettingsRoot.GetComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1920f, 1080f);
+            scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
+            scaler.matchWidthOrHeight = 0.5f;
+
+            var backdrop = CreateUiObject("Backdrop", _gameplaySettingsRoot.transform, typeof(RectTransform), typeof(Image), typeof(Button));
+            var backdropRect = backdrop.GetComponent<RectTransform>();
+            backdropRect.anchorMin = Vector2.zero;
+            backdropRect.anchorMax = Vector2.one;
+            backdropRect.offsetMin = Vector2.zero;
+            backdropRect.offsetMax = Vector2.zero;
+            backdrop.GetComponent<Image>().color = new Color(0.01f, 0.01f, 0.03f, 0.58f);
+            backdrop.GetComponent<Button>().onClick.AddListener(CloseGameplaySettingsOverlay);
+
+            var panel = CreateUiObject("Panel", _gameplaySettingsRoot.transform, typeof(RectTransform), typeof(Image));
+            _gameplaySettingsPanelRect = panel.GetComponent<RectTransform>();
+            _gameplaySettingsPanelRect.anchorMin = new Vector2(0.5f, 0.5f);
+            _gameplaySettingsPanelRect.anchorMax = new Vector2(0.5f, 0.5f);
+            _gameplaySettingsPanelRect.pivot = new Vector2(0.5f, 0.5f);
+            _gameplaySettingsPanelRect.sizeDelta = new Vector2(1240f, 760f);
+            panel.GetComponent<Image>().color = new Color(0.04f, 0.07f, 0.13f, 0.97f);
+
+            var outline = panel.AddComponent<Outline>();
+            outline.effectColor = new Color(0.09f, 0.75f, 1f, 0.78f);
+            outline.effectDistance = new Vector2(2f, 2f);
+
+            var title = CreateSettingsText(panel.transform, "Title", "SETTINGS", 34f, FontStyles.Bold, TextAlignmentOptions.Left, Color.white);
+            SetRect(title.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(34f, -32f), new Vector2(520f, 48f), new Vector2(0f, 1f));
+
+            _gameplaySettingsStatusText = CreateSettingsText(panel.transform, "Status", string.Empty, 16f, FontStyles.Normal, TextAlignmentOptions.Left, new Color(0.58f, 0.86f, 1f, 1f));
+            SetRect(_gameplaySettingsStatusText.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(36f, -82f), new Vector2(760f, 30f), new Vector2(0f, 1f));
+
+            var closeButton = CreateSettingsButton(panel.transform, "CloseButton", "Back", new Color(0.14f, 0.22f, 0.38f, 0.96f), CloseGameplaySettingsOverlay);
+            SetRect(closeButton.GetComponent<RectTransform>(), new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-34f, -32f), new Vector2(150f, 42f), new Vector2(1f, 1f));
+
+            CreateGameplaySettingsTabButton(panel.transform, GameplaySettingsTab.Game, "Game", new Vector2(-480f, 204f));
+            CreateGameplaySettingsTabButton(panel.transform, GameplaySettingsTab.Controls, "Controls", new Vector2(-480f, 132f));
+            CreateGameplaySettingsTabButton(panel.transform, GameplaySettingsTab.Video, "Video", new Vector2(-480f, 60f));
+            CreateGameplaySettingsTabButton(panel.transform, GameplaySettingsTab.KeyBindings, "Key Bindings", new Vector2(-480f, -12f));
+
+            var contentHost = CreateUiObject("ContentHost", panel.transform, typeof(RectTransform), typeof(Image));
+            contentHost.transform.SetSiblingIndex(0);
+            _gameplaySettingsContentHost = contentHost.GetComponent<RectTransform>();
+            SetRect(_gameplaySettingsContentHost, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(150f, -48f), new Vector2(870f, 590f), new Vector2(0.5f, 0.5f));
+            var contentHostImage = contentHost.GetComponent<Image>();
+            contentHostImage.color = new Color(0.07f, 0.11f, 0.19f, 0.94f);
+            contentHostImage.raycastTarget = false;
+
+            _gameplaySettingsRoot.SetActive(false);
+        }
+
+        private void CreateGameplaySettingsTabButton(Transform parent, GameplaySettingsTab tab, string label, Vector2 anchoredPosition)
+        {
+            var button = CreateSettingsButton(parent, $"{tab}Tab", label, new Color(0.1f, 0.14f, 0.24f, 0.92f), () => SetGameplaySettingsTab(tab));
+            SetRect(button.GetComponent<RectTransform>(), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), anchoredPosition, new Vector2(240f, 54f), new Vector2(0.5f, 0.5f));
+            _gameplaySettingsTabImages[tab] = button.GetComponent<Image>();
+        }
+
+        private void SetGameplaySettingsTab(GameplaySettingsTab tab)
+        {
+            _gameplaySettingsTab = tab;
+            _pendingGameplaySettingsBindingAction = null;
+            RebuildGameplaySettingsContent();
+            RefreshGameplaySettingsStatus();
+        }
+
+        private void RebuildGameplaySettingsContent()
+        {
+            if (_gameplaySettingsContentHost == null)
+            {
+                return;
+            }
+
+            foreach (var pair in _gameplaySettingsTabImages)
+            {
+                pair.Value.color = pair.Key == _gameplaySettingsTab
+                    ? new Color(0.12f, 0.32f, 0.58f, 0.98f)
+                    : new Color(0.1f, 0.14f, 0.24f, 0.92f);
+            }
+
+            ClearUiChildren(_gameplaySettingsContentHost);
+            _gameplaySettingsBindingValueTexts.Clear();
+
+            var content = CreateSettingsScrollContent(_gameplaySettingsContentHost);
+
+            switch (_gameplaySettingsTab)
+            {
+                case GameplaySettingsTab.Controls:
+                    BuildGameplayControlsSettings(content);
+                    break;
+                case GameplaySettingsTab.Video:
+                    BuildGameplayVideoSettings(content);
+                    break;
+                case GameplaySettingsTab.KeyBindings:
+                    BuildGameplayKeyBindingSettings(content);
+                    break;
+                default:
+                    BuildGameplayGameSettings(content);
+                    break;
+            }
+
+            Canvas.ForceUpdateCanvases();
+            if (content is RectTransform contentRect)
+            {
+                LayoutRebuilder.ForceRebuildLayoutImmediate(contentRect);
+            }
+        }
+
+        private Transform CreateSettingsScrollContent(RectTransform parent)
+        {
+            var viewport = CreateUiObject("Viewport", parent, typeof(RectTransform), typeof(Image), typeof(Mask), typeof(ScrollRect));
+            var viewportRect = viewport.GetComponent<RectTransform>();
+            viewportRect.anchorMin = Vector2.zero;
+            viewportRect.anchorMax = Vector2.one;
+            viewportRect.offsetMin = new Vector2(18f, 18f);
+            viewportRect.offsetMax = new Vector2(-32f, -18f);
+            viewport.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0.08f);
+            viewport.GetComponent<Mask>().showMaskGraphic = false;
+
+            var content = CreateUiObject("Content", viewport.transform, typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(ContentSizeFitter));
+            var contentRect = content.GetComponent<RectTransform>();
+            contentRect.anchorMin = new Vector2(0f, 1f);
+            contentRect.anchorMax = new Vector2(1f, 1f);
+            contentRect.pivot = new Vector2(0.5f, 1f);
+            contentRect.anchoredPosition = Vector2.zero;
+            contentRect.sizeDelta = Vector2.zero;
+
+            var layout = content.GetComponent<VerticalLayoutGroup>();
+            layout.padding = new RectOffset(18, 18, 16, 34);
+            layout.spacing = 10f;
+            layout.childControlWidth = true;
+            layout.childControlHeight = false;
+            layout.childForceExpandWidth = true;
+            layout.childForceExpandHeight = false;
+            content.GetComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+            var scrollbarObject = CreateUiObject("Scrollbar", parent, typeof(RectTransform), typeof(Image), typeof(Scrollbar));
+            var scrollbarRect = scrollbarObject.GetComponent<RectTransform>();
+            scrollbarRect.anchorMin = new Vector2(1f, 0f);
+            scrollbarRect.anchorMax = new Vector2(1f, 1f);
+            scrollbarRect.offsetMin = new Vector2(-18f, 18f);
+            scrollbarRect.offsetMax = new Vector2(-8f, -18f);
+            scrollbarObject.GetComponent<Image>().color = new Color(0.13f, 0.19f, 0.3f, 0.9f);
+
+            var slidingArea = CreateUiObject("Sliding Area", scrollbarObject.transform, typeof(RectTransform));
+            var slidingRect = slidingArea.GetComponent<RectTransform>();
+            slidingRect.anchorMin = Vector2.zero;
+            slidingRect.anchorMax = Vector2.one;
+            slidingRect.offsetMin = new Vector2(1f, 1f);
+            slidingRect.offsetMax = new Vector2(-1f, -1f);
+
+            var handle = CreateUiObject("Handle", slidingArea.transform, typeof(RectTransform), typeof(Image));
+            var handleRect = handle.GetComponent<RectTransform>();
+            handleRect.anchorMin = new Vector2(0f, 1f);
+            handleRect.anchorMax = new Vector2(1f, 1f);
+            handleRect.pivot = new Vector2(0.5f, 1f);
+            handleRect.sizeDelta = new Vector2(0f, 48f);
+            handle.GetComponent<Image>().color = new Color(0.39f, 0.72f, 1f, 0.96f);
+
+            var scrollbar = scrollbarObject.GetComponent<Scrollbar>();
+            scrollbar.direction = Scrollbar.Direction.BottomToTop;
+            scrollbar.handleRect = handleRect;
+            scrollbar.targetGraphic = handle.GetComponent<Image>();
+            scrollbar.value = 1f;
+
+            var scrollRect = viewport.GetComponent<ScrollRect>();
+            scrollRect.viewport = viewportRect;
+            scrollRect.content = contentRect;
+            scrollRect.horizontal = false;
+            scrollRect.vertical = true;
+            scrollRect.scrollSensitivity = 28f;
+            scrollRect.movementType = ScrollRect.MovementType.Clamped;
+            scrollRect.inertia = true;
+            scrollRect.verticalScrollbar = scrollbar;
+            scrollRect.verticalScrollbarVisibility = ScrollRect.ScrollbarVisibility.AutoHideAndExpandViewport;
+
+            return content.transform;
+        }
+
+        private void BuildGameplayGameSettings(Transform content)
+        {
+            CreateSettingsSection(content, "Game");
+            CreateSettingsToggleRow(content, "Show HUD", RetrowaveGameSettings.ShowHud, value => RetrowaveGameSettings.SetShowHud(value));
+            CreateSettingsSliderRow(content, "Music Volume", RetrowaveGameSettings.MusicVolume, RetrowaveGameSettings.SetMusicVolume);
+            CreateSettingsNote(content, "These settings apply immediately and carry back to the main menu.");
+        }
+
+        private void BuildGameplayControlsSettings(Transform content)
+        {
+            CreateSettingsSection(content, "Controls");
+            CreateSettingsToggleRow(content, "Invert Camera Look", RetrowaveGameSettings.InvertLook, value => RetrowaveGameSettings.SetInvertLook(value));
+            CreateSettingsSliderRow(content, "Look Sensitivity X", RetrowaveGameSettings.LookSensitivityXNormalized, RetrowaveGameSettings.SetLookSensitivityX);
+            CreateSettingsSliderRow(content, "Look Sensitivity Y", RetrowaveGameSettings.LookSensitivityYNormalized, RetrowaveGameSettings.SetLookSensitivityY);
+            CreateSettingsNote(content, "Key rebinding has its own tab so it can use a larger scrollable list.");
+        }
+
+        private void BuildGameplayVideoSettings(Transform content)
+        {
+            CreateSettingsSection(content, "Video");
+            CreateSettingsToggleRow(content, "Full Screen", RetrowaveGameSettings.Fullscreen, value => RetrowaveGameSettings.SetFullscreen(value));
+            CreateSettingsToggleRow(content, "V-Sync", RetrowaveGameSettings.VSync, value => RetrowaveGameSettings.SetVSync(value));
+            CreateSettingsToggleRow(content, "Ambient Occlusion", RetrowaveGameSettings.AmbientOcclusion, value => RetrowaveGameSettings.SetAmbientOcclusion(value));
+            CreateSettingsToggleRow(content, "Motion Blur", RetrowaveGameSettings.MotionBlur, value => RetrowaveGameSettings.SetMotionBlur(value));
+            CreateSettingsChoiceRow(content, "Shadow Quality", new[] { "Off", "Low", "High" }, (int)RetrowaveGameSettings.ShadowQuality, index => RetrowaveGameSettings.SetShadowQuality((RetrowaveShadowQuality)index));
+            CreateSettingsChoiceRow(content, "Texture Quality", new[] { "Low", "Med", "High" }, (int)RetrowaveGameSettings.TextureQuality, index => RetrowaveGameSettings.SetTextureQuality((RetrowaveTextureQuality)index));
+            CreateSettingsChoiceRow(content, "Camera Effects", new[] { "Clean", "Retro", "Cinema", "Neon" }, (int)RetrowaveGameSettings.CameraEffectPreset, index => RetrowaveGameSettings.SetCameraEffectPreset((RetrowaveCameraEffectPreset)index));
+        }
+
+        private void BuildGameplayKeyBindingSettings(Transform content)
+        {
+            CreateSettingsSection(content, "Key Bindings");
+            CreateSettingsNote(content, "Click a binding, then press the key you want. Changes save immediately.");
+
+            var definitions = RetrowaveInputBindings.AllDefinitions;
+
+            foreach (RetrowaveBindingCategory category in Enum.GetValues(typeof(RetrowaveBindingCategory)))
+            {
+                CreateSettingsSection(content, category switch
+                {
+                    RetrowaveBindingCategory.Driving => "Driving",
+                    RetrowaveBindingCategory.Camera => "Camera",
+                    _ => "Menu",
+                });
+
+                for (var i = 0; i < definitions.Count; i++)
+                {
+                    if (definitions[i].Category != category)
+                    {
+                        continue;
+                    }
+
+                    CreateSettingsBindingRow(content, definitions[i]);
+                }
+            }
+
+            var resetButton = CreateSettingsButton(content, "ResetBindings", "Reset Defaults", new Color(0.16f, 0.24f, 0.4f, 0.96f), () =>
+            {
+                RetrowaveInputBindings.ResetToDefaults();
+                _pendingGameplaySettingsBindingAction = null;
+                RebuildGameplaySettingsContent();
+                RefreshGameplaySettingsStatus();
+            });
+            resetButton.gameObject.GetComponent<LayoutElement>().preferredHeight = 46f;
+        }
+
+        private void CreateSettingsSection(Transform parent, string label)
+        {
+            var text = CreateSettingsText(parent, $"{label}Section", label.ToUpperInvariant(), 21f, FontStyles.Bold, TextAlignmentOptions.Left, new Color(0.66f, 0.9f, 1f, 1f));
+            var layout = text.gameObject.AddComponent<LayoutElement>();
+            layout.minHeight = 34f;
+            layout.preferredHeight = 34f;
+        }
+
+        private void CreateSettingsNote(Transform parent, string label)
+        {
+            var text = CreateSettingsText(parent, "Note", label, 14f, FontStyles.Italic, TextAlignmentOptions.Left, new Color(0.72f, 0.84f, 0.92f, 0.94f));
+            text.textWrappingMode = TextWrappingModes.Normal;
+            var layout = text.gameObject.AddComponent<LayoutElement>();
+            layout.minHeight = 34f;
+            layout.preferredHeight = 34f;
+        }
+
+        private void CreateSettingsToggleRow(Transform parent, string label, bool value, Action<bool> onChanged)
+        {
+            CreateSettingsChoiceRow(parent, label, new[] { "Off", "On" }, value ? 1 : 0, index => onChanged(index == 1));
+        }
+
+        private void CreateSettingsChoiceRow(Transform parent, string label, string[] choices, int selectedIndex, Action<int> onChanged)
+        {
+            var row = CreateSettingsRow(parent, label, 58f);
+
+            var group = CreateUiObject("Choices", row.transform, typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
+            var groupLayout = group.GetComponent<HorizontalLayoutGroup>();
+            groupLayout.spacing = 8f;
+            groupLayout.childControlWidth = false;
+            groupLayout.childControlHeight = true;
+            groupLayout.childForceExpandWidth = false;
+            groupLayout.childForceExpandHeight = true;
+            group.GetComponent<LayoutElement>().preferredWidth = Mathf.Max(220f, choices.Length * 104f);
+
+            for (var i = 0; i < choices.Length; i++)
+            {
+                var optionIndex = i;
+                var selected = optionIndex == selectedIndex;
+                var button = CreateSettingsButton(group.transform, $"{choices[i]}Choice", choices[i], selected ? new Color(0.14f, 0.42f, 0.66f, 0.98f) : new Color(0.13f, 0.18f, 0.3f, 0.96f), () =>
+                {
+                    onChanged(optionIndex);
+                    RebuildGameplaySettingsContent();
+                    RefreshGameplaySettingsStatus();
+                });
+                button.gameObject.GetComponent<LayoutElement>().preferredWidth = 96f;
+            }
+        }
+
+        private void CreateSettingsSliderRow(Transform parent, string label, float value, Action<float> onChanged)
+        {
+            var row = CreateSettingsRow(parent, label, 70f);
+
+            var valueText = CreateSettingsText(row.transform, "Value", $"{Mathf.RoundToInt(value * 100f)}%", 16f, FontStyles.Bold, TextAlignmentOptions.Center, Color.white);
+            valueText.gameObject.AddComponent<LayoutElement>().preferredWidth = 72f;
+
+            var slider = CreateSettingsSlider(row.transform, value);
+            slider.gameObject.GetComponent<LayoutElement>().preferredWidth = 330f;
+            slider.onValueChanged.AddListener(newValue =>
+            {
+                valueText.text = $"{Mathf.RoundToInt(newValue * 100f)}%";
+                onChanged(newValue);
+            });
+        }
+
+        private void CreateSettingsBindingRow(Transform parent, RetrowaveBindingDefinition definition)
+        {
+            var row = CreateSettingsRow(parent, definition.Label, 48f);
+            var value = _pendingGameplaySettingsBindingAction == definition.Action
+                ? "Press key..."
+                : RetrowaveInputBindings.GetBindingDisplayName(definition.Action);
+            var button = CreateSettingsButton(row.transform, $"{definition.Action}Binding", value, new Color(0.14f, 0.22f, 0.38f, 0.96f), () =>
+            {
+                _pendingGameplaySettingsBindingAction = definition.Action;
+                RefreshGameplaySettingsBindingTexts();
+                RefreshGameplaySettingsStatus();
+            });
+            button.gameObject.GetComponent<LayoutElement>().preferredWidth = 210f;
+            _gameplaySettingsBindingValueTexts[definition.Action] = button.GetComponentInChildren<TextMeshProUGUI>(true);
+        }
+
+        private GameObject CreateSettingsRow(Transform parent, string label, float height)
+        {
+            var row = CreateUiObject($"{label}Row", parent, typeof(RectTransform), typeof(Image), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
+            row.GetComponent<Image>().color = new Color(0.1f, 0.15f, 0.24f, 0.82f);
+            var layoutElement = row.GetComponent<LayoutElement>();
+            layoutElement.minHeight = height;
+            layoutElement.preferredHeight = height;
+
+            var layout = row.GetComponent<HorizontalLayoutGroup>();
+            layout.padding = new RectOffset(18, 18, 8, 8);
+            layout.spacing = 12f;
+            layout.childControlWidth = true;
+            layout.childControlHeight = true;
+            layout.childForceExpandWidth = false;
+            layout.childForceExpandHeight = true;
+
+            var labelText = CreateSettingsText(row.transform, "Label", label, 17f, FontStyles.Bold, TextAlignmentOptions.MidlineLeft, Color.white);
+            var labelLayout = labelText.gameObject.AddComponent<LayoutElement>();
+            labelLayout.flexibleWidth = 1f;
+            labelLayout.minWidth = 250f;
+
+            return row;
+        }
+
+        private Slider CreateSettingsSlider(Transform parent, float value)
+        {
+            var sliderObject = CreateUiObject("Slider", parent, typeof(RectTransform), typeof(Slider), typeof(LayoutElement));
+            var sliderRect = sliderObject.GetComponent<RectTransform>();
+            sliderRect.sizeDelta = new Vector2(320f, 26f);
+
+            var background = CreateUiObject("Background", sliderObject.transform, typeof(RectTransform), typeof(Image));
+            var backgroundRect = background.GetComponent<RectTransform>();
+            backgroundRect.anchorMin = new Vector2(0f, 0.5f);
+            backgroundRect.anchorMax = new Vector2(1f, 0.5f);
+            backgroundRect.sizeDelta = new Vector2(0f, 12f);
+            background.GetComponent<Image>().color = new Color(0.05f, 0.08f, 0.14f, 1f);
+
+            var fillArea = CreateUiObject("Fill Area", sliderObject.transform, typeof(RectTransform));
+            var fillAreaRect = fillArea.GetComponent<RectTransform>();
+            fillAreaRect.anchorMin = new Vector2(0f, 0.5f);
+            fillAreaRect.anchorMax = new Vector2(1f, 0.5f);
+            fillAreaRect.offsetMin = new Vector2(6f, -6f);
+            fillAreaRect.offsetMax = new Vector2(-6f, 6f);
+
+            var fill = CreateUiObject("Fill", fillArea.transform, typeof(RectTransform), typeof(Image));
+            var fillRect = fill.GetComponent<RectTransform>();
+            fillRect.anchorMin = Vector2.zero;
+            fillRect.anchorMax = Vector2.one;
+            fillRect.offsetMin = Vector2.zero;
+            fillRect.offsetMax = Vector2.zero;
+            fill.GetComponent<Image>().color = new Color(0.91f, 0.28f, 0.74f, 1f);
+
+            var handleArea = CreateUiObject("Handle Slide Area", sliderObject.transform, typeof(RectTransform));
+            var handleAreaRect = handleArea.GetComponent<RectTransform>();
+            handleAreaRect.anchorMin = Vector2.zero;
+            handleAreaRect.anchorMax = Vector2.one;
+            handleAreaRect.offsetMin = new Vector2(8f, 0f);
+            handleAreaRect.offsetMax = new Vector2(-8f, 0f);
+
+            var handle = CreateUiObject("Handle", handleArea.transform, typeof(RectTransform), typeof(Image));
+            var handleRect = handle.GetComponent<RectTransform>();
+            handleRect.sizeDelta = new Vector2(22f, 22f);
+            handle.GetComponent<Image>().color = new Color(0.39f, 0.84f, 1f, 1f);
+
+            var slider = sliderObject.GetComponent<Slider>();
+            slider.minValue = 0f;
+            slider.maxValue = 1f;
+            slider.value = Mathf.Clamp01(value);
+            slider.fillRect = fillRect;
+            slider.handleRect = handleRect;
+            slider.targetGraphic = handle.GetComponent<Image>();
+            slider.direction = Slider.Direction.LeftToRight;
+            return slider;
+        }
+
+        private Button CreateSettingsButton(Transform parent, string name, string label, Color color, UnityEngine.Events.UnityAction onClick)
+        {
+            var buttonObject = CreateUiObject(name, parent, typeof(RectTransform), typeof(Image), typeof(Button), typeof(LayoutElement));
+            var image = buttonObject.GetComponent<Image>();
+            image.color = color;
+            var layout = buttonObject.GetComponent<LayoutElement>();
+            layout.preferredWidth = 150f;
+            layout.preferredHeight = 38f;
+
+            var button = buttonObject.GetComponent<Button>();
+            var colors = button.colors;
+            colors.normalColor = color;
+            colors.highlightedColor = Color.Lerp(color, Color.white, 0.18f);
+            colors.pressedColor = Color.Lerp(color, Color.black, 0.22f);
+            colors.selectedColor = colors.highlightedColor;
+            button.colors = colors;
+            button.targetGraphic = image;
+            button.onClick.AddListener(onClick);
+
+            var text = CreateSettingsText(buttonObject.transform, "Label", label, 16f, FontStyles.Bold, TextAlignmentOptions.Center, Color.white);
+            text.rectTransform.anchorMin = Vector2.zero;
+            text.rectTransform.anchorMax = Vector2.one;
+            text.rectTransform.offsetMin = Vector2.zero;
+            text.rectTransform.offsetMax = Vector2.zero;
+            text.textWrappingMode = TextWrappingModes.NoWrap;
+            text.overflowMode = TextOverflowModes.Ellipsis;
+            return button;
+        }
+
+        private TMP_Text CreateSettingsText(Transform parent, string name, string value, float fontSize, FontStyles style, TextAlignmentOptions alignment, Color color)
+        {
+            var textObject = CreateUiObject(name, parent, typeof(RectTransform), typeof(TextMeshProUGUI));
+            var text = textObject.GetComponent<TextMeshProUGUI>();
+            text.font = _gameplayMenuFont != null ? _gameplayMenuFont : TMP_Settings.defaultFontAsset;
+            text.text = value;
+            text.fontSize = fontSize;
+            text.fontStyle = style;
+            text.alignment = alignment;
+            text.color = color;
+            text.textWrappingMode = TextWrappingModes.NoWrap;
+            text.overflowMode = TextOverflowModes.Truncate;
+            text.raycastTarget = false;
+            return text;
+        }
+
+        private void RefreshGameplaySettingsBindingTexts()
+        {
+            foreach (var pair in _gameplaySettingsBindingValueTexts)
+            {
+                pair.Value.text = _pendingGameplaySettingsBindingAction == pair.Key
+                    ? "Press key..."
+                    : RetrowaveInputBindings.GetBindingDisplayName(pair.Key);
+            }
+        }
+
+        private void RefreshGameplaySettingsStatus()
+        {
+            if (_gameplaySettingsStatusText == null)
+            {
+                return;
+            }
+
+            _gameplaySettingsStatusText.text = _pendingGameplaySettingsBindingAction.HasValue
+                ? $"Listening for {RetrowaveInputBindings.GetDefinition(_pendingGameplaySettingsBindingAction.Value).Label}..."
+                : "Adjust game, controls, video, and bindings. Changes save immediately.";
+        }
+
+        private static void SetRect(RectTransform rect, Vector2 anchorMin, Vector2 anchorMax, Vector2 anchoredPosition, Vector2 size, Vector2 pivot)
+        {
+            rect.anchorMin = anchorMin;
+            rect.anchorMax = anchorMax;
+            rect.pivot = pivot;
+            rect.anchoredPosition = anchoredPosition;
+            rect.sizeDelta = size;
+        }
+
+        private static void ClearUiChildren(Transform parent)
+        {
+            for (var i = parent.childCount - 1; i >= 0; i--)
+            {
+                var child = parent.GetChild(i);
+                child.SetParent(null, false);
+                Destroy(child.gameObject);
+            }
         }
 
         private void DrawGoalCelebrationIndicator()
@@ -2830,7 +3442,7 @@ namespace RetrowaveRocket
             return _networkManager != null
                    && _networkManager.IsListening
                    && IsGameplayScene(SceneManager.GetActiveScene())
-                   && (_showPauseMenu || RequiresRoleSelection() || gameplayLocked);
+                   && (_showPauseMenu || RequiresRoleSelection() || gameplayLocked || IsGameplaySettingsVisible());
         }
 
         private static string GetTeamLabel(RetrowaveTeam team)
@@ -3184,6 +3796,7 @@ namespace RetrowaveRocket
             RetrowaveArenaBuilder.SetActive(false);
             ClearPodiumPresentation();
             DestroyGameplayMenuOverlay();
+            DestroyGameplaySettingsOverlay();
             DestroyGameplayHudOverlay();
         }
 
