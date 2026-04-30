@@ -132,6 +132,16 @@ namespace RetrowaveRocket
             NetworkVariableReadPermission.Everyone,
             NetworkVariableWritePermission.Server);
 
+        private readonly NetworkVariable<float> _engineAudioThrottle = new(
+            0f,
+            NetworkVariableReadPermission.Everyone,
+            NetworkVariableWritePermission.Server);
+
+        private readonly NetworkVariable<bool> _engineAudioBoosting = new(
+            false,
+            NetworkVariableReadPermission.Everyone,
+            NetworkVariableWritePermission.Server);
+
         private readonly NetworkVariable<bool> _podiumPresentationHidden = new(
             false,
             NetworkVariableReadPermission.Everyone,
@@ -185,6 +195,8 @@ namespace RetrowaveRocket
         public bool IsGroundedForHud => _isGrounded;
         public Rigidbody Body => _rigidbody;
         public ulong ControllingClientId => OwnerClientId;
+        public float EngineAudioThrottle => IsOwner ? _cachedThrottle : _engineAudioThrottle.Value;
+        public bool EngineAudioBoosting => _engineAudioBoosting.Value;
 
         private void Awake()
         {
@@ -285,6 +297,7 @@ namespace RetrowaveRocket
                 _rigidbody.linearVelocity = Vector3.zero;
                 _rigidbody.angularVelocity = Vector3.zero;
                 _boostFx.Value = false;
+                SetEngineAudioStateServer(0f, false);
                 return;
             }
 
@@ -408,6 +421,7 @@ namespace RetrowaveRocket
             _boostRequiresRelease = false;
             _glideRequiresRelease = false;
             _boostRechargeDelayTimer = 0f;
+            SetEngineAudioStateServer(0f, false);
             _statusEffects?.ClearServer();
         }
 
@@ -431,6 +445,7 @@ namespace RetrowaveRocket
             _boostRequiresRelease = false;
             _glideRequiresRelease = false;
             _boostRechargeDelayTimer = 0f;
+            SetEngineAudioStateServer(0f, false);
             _statusEffects?.ClearServer();
         }
 
@@ -460,6 +475,7 @@ namespace RetrowaveRocket
             _boostRequiresRelease = false;
             _glideRequiresRelease = false;
             _boostRechargeDelayTimer = 0f;
+            SetEngineAudioStateServer(0f, false);
             _statusEffects?.ClearServer();
         }
 
@@ -504,6 +520,7 @@ namespace RetrowaveRocket
             _boostFx.Value = false;
             _boostRequiresRelease = false;
             _glideRequiresRelease = false;
+            SetEngineAudioStateServer(0f, false);
             _statusEffects?.ClearServer();
             _rarePowerUpInventory ??= GetComponent<RarePowerUpInventory>();
             _rarePowerUpInventory?.ClearServer();
@@ -681,6 +698,7 @@ namespace RetrowaveRocket
             }
 
             _boostFx.Value = isBoosting || isGliding;
+            SetEngineAudioStateServer(controlInput.Throttle, isBoosting);
 
             if (input.ResetPressed || !RetrowaveArenaConfig.IsWithinArenaRecoveryBounds(transform.position))
             {
@@ -960,6 +978,17 @@ namespace RetrowaveRocket
         {
             _boostAmount.Value = 0f;
             _boostRechargeDelayTimer = BoostRechargeDelaySeconds;
+        }
+
+        private void SetEngineAudioStateServer(float throttle, bool isBoosting)
+        {
+            if (!IsServer)
+            {
+                return;
+            }
+
+            _engineAudioThrottle.Value = Mathf.Clamp(throttle, -1f, 1f);
+            _engineAudioBoosting.Value = isBoosting;
         }
 
         private void HandleTeamChanged(int _, int nextValue)
