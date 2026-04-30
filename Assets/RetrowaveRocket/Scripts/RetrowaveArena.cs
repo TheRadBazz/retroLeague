@@ -22,6 +22,14 @@ namespace RetrowaveRocket
         SpeedBurst = 1,
     }
 
+    public enum RetrowaveRarePowerUpType
+    {
+        None = 0,
+        NeonSnareTrail = 1,
+        GravityBomb = 2,
+        ChronoDome = 3,
+    }
+
     public enum RetrowaveArenaSizePreset
     {
         Auto = 0,
@@ -309,7 +317,7 @@ namespace RetrowaveRocket
         public const float PowerUpRespawnSeconds = 8f;
         public const float SpeedBurstMultiplier = 1.4f;
         public const float SpeedBurstDuration = 4.5f;
-        public const float PassiveBoostRegen = 2.5f;
+        public const float PassiveBoostRegen = 3.5f;
         private const float VehicleSpawnClearance = 1.05f;
         private const float BallSpawnClearance = 1.35f;
 
@@ -556,6 +564,20 @@ namespace RetrowaveRocket
             return material;
         }
 
+        public static Material CreateTransparentLitMaterial(Color baseColor, Color emissionColor, float smoothness = 0.7f, float metallic = 0.05f)
+        {
+            var material = CreateLitMaterial(baseColor, emissionColor, smoothness, metallic);
+            ConfigureTransparentMaterial(material);
+            return material;
+        }
+
+        public static Material CreateTransparentUnlitMaterial(Color color)
+        {
+            var material = CreateUnlitMaterial(color);
+            ConfigureTransparentMaterial(material);
+            return material;
+        }
+
         public static Material CreateTerrainLayerMaterial(TerrainLayer terrainLayer, Color tint, Color emissionColor, float uvWorldScale = 0.08f)
         {
             var material = CreateLitMaterial(tint, emissionColor, 0.28f, 0f);
@@ -609,6 +631,23 @@ namespace RetrowaveRocket
             }
 
             return material;
+        }
+
+        public static void ConfigureTransparentMaterial(Material material)
+        {
+            if (material == null)
+            {
+                return;
+            }
+
+            SetMaterialFloat(material, "_Surface", 1f);
+            SetMaterialFloat(material, "_Blend", 0f);
+            SetMaterialFloat(material, "_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            SetMaterialFloat(material, "_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            SetMaterialFloat(material, "_ZWrite", 0f);
+            material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            material.DisableKeyword("_ALPHATEST_ON");
+            material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
         }
 
         public static Color GetTeamBase(RetrowaveTeam team)

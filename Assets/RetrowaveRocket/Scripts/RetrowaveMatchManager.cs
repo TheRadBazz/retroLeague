@@ -644,6 +644,7 @@ namespace RetrowaveRocket
         private void StartMatch()
         {
             CancelGoalCelebration();
+            ClearPowerUpsForMatchStart();
             _blueScore.Value = 0;
             _pinkScore.Value = 0;
             _roundNumber.Value = 1;
@@ -664,6 +665,52 @@ namespace RetrowaveRocket
 
             ClearTouchHistory();
             BeginKickoffCountdown();
+        }
+
+        private void ClearPowerUpsForMatchStart()
+        {
+            if (!IsServer || NetworkManager.Singleton == null)
+            {
+                return;
+            }
+
+            var objectsToDespawn = new List<NetworkObject>();
+
+            foreach (var networkObject in NetworkManager.Singleton.SpawnManager.SpawnedObjectsList)
+            {
+                if (networkObject == null)
+                {
+                    continue;
+                }
+
+                if (networkObject.TryGetComponent<RetrowavePlayerController>(out var player))
+                {
+                    player.ClearPowerUpsForMatchStartServer();
+                }
+
+                if (networkObject.TryGetComponent<RarePowerUpPickupBeacon>(out _)
+                    || networkObject.TryGetComponent<NeonTrailSegment>(out _)
+                    || networkObject.TryGetComponent<GravityBombDevice>(out _)
+                    || networkObject.TryGetComponent<ChronoDomeField>(out _))
+                {
+                    objectsToDespawn.Add(networkObject);
+                }
+            }
+
+            for (var i = 0; i < objectsToDespawn.Count; i++)
+            {
+                var networkObject = objectsToDespawn[i];
+
+                if (networkObject != null && networkObject.IsSpawned)
+                {
+                    networkObject.Despawn(true);
+                }
+            }
+
+            if (TryGetComponent<RarePowerUpSpawner>(out var rareSpawner))
+            {
+                rareSpawner.ResetForMatchStartServer();
+            }
         }
 
         private void AdvanceToNextRound()

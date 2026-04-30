@@ -27,6 +27,7 @@ namespace RetrowaveRocket
         ToggleMatchInfo = 10,
         Scoreboard = 11,
         Pause = 12,
+        ActivateRarePowerUp = 13,
     }
 
     public readonly struct RetrowaveBindingDefinition
@@ -64,6 +65,7 @@ namespace RetrowaveRocket
             new(RetrowaveBindingAction.ToggleMatchInfo, "Toggle Match Info", RetrowaveBindingCategory.Menus, Key.H),
             new(RetrowaveBindingAction.Scoreboard, "Scoreboard", RetrowaveBindingCategory.Menus, Key.Tab),
             new(RetrowaveBindingAction.Pause, "Pause Menu", RetrowaveBindingCategory.Menus, Key.Escape),
+            new(RetrowaveBindingAction.ActivateRarePowerUp, "Activate Rare Power-Up", RetrowaveBindingCategory.Driving, Key.F),
         };
 
         private static readonly Dictionary<RetrowaveBindingAction, RetrowaveBindingDefinition> DefinitionLookup = new();

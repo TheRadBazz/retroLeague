@@ -43,6 +43,7 @@ namespace RetrowaveRocket
         }
     }
 
+    [DisallowMultipleComponent]
     [RequireComponent(typeof(Rigidbody))]
     public sealed class RetrowavePlayerController : NetworkBehaviour
     {
@@ -140,8 +141,13 @@ namespace RetrowaveRocket
         private Collider[] _colliders;
         private MeshRenderer[] _vehicleRenderers;
         private Light _boostLight;
+        private VehicleStatusEffects _statusEffects;
+        private RarePowerUpInventory _rarePowerUpInventory;
         private Canvas _nameTagCanvas;
         private TextMeshProUGUI _nameTagText;
+        private GameObject _nameTagPowerUpIconRoot;
+        private Image _nameTagPowerUpIconImage;
+        private TextMeshProUGUI _nameTagPowerUpIconText;
         private string _appliedDisplayName = string.Empty;
         private Material _appliedBodyMaterial;
         private RetrowavePlayerInputState _latestInput;
@@ -186,6 +192,8 @@ namespace RetrowaveRocket
             _colliders = GetComponentsInChildren<Collider>(true);
             _vehicleRenderers = GetComponentsInChildren<MeshRenderer>(true);
             _boostLight = GetComponentInChildren<Light>(true);
+            _statusEffects = GetComponent<VehicleStatusEffects>();
+            _rarePowerUpInventory = GetComponent<RarePowerUpInventory>();
             EnsureNameTag();
 
             if (_boostLight == null)
@@ -400,6 +408,7 @@ namespace RetrowaveRocket
             _boostRequiresRelease = false;
             _glideRequiresRelease = false;
             _boostRechargeDelayTimer = 0f;
+            _statusEffects?.ClearServer();
         }
 
         public void SetPodiumPresentationServer(Vector3 position, Quaternion rotation, bool isVisible)
@@ -422,6 +431,7 @@ namespace RetrowaveRocket
             _boostRequiresRelease = false;
             _glideRequiresRelease = false;
             _boostRechargeDelayTimer = 0f;
+            _statusEffects?.ClearServer();
         }
 
         public void SetSpectatorStateServer(bool hasSelectedRole)
@@ -450,6 +460,7 @@ namespace RetrowaveRocket
             _boostRequiresRelease = false;
             _glideRequiresRelease = false;
             _boostRechargeDelayTimer = 0f;
+            _statusEffects?.ClearServer();
         }
 
         public void RequestRoleSelection(RetrowaveLobbyRole role)
@@ -480,6 +491,22 @@ namespace RetrowaveRocket
                     _rigidbody.AddForce(transform.forward * 9f, ForceMode.VelocityChange);
                     break;
             }
+        }
+
+        public void ClearPowerUpsForMatchStartServer()
+        {
+            if (!IsServer)
+            {
+                return;
+            }
+
+            _speedBoostTimer.Value = 0f;
+            _boostFx.Value = false;
+            _boostRequiresRelease = false;
+            _glideRequiresRelease = false;
+            _statusEffects?.ClearServer();
+            _rarePowerUpInventory ??= GetComponent<RarePowerUpInventory>();
+            _rarePowerUpInventory?.ClearServer();
         }
 
         public static void ClearLocalOwner()
@@ -585,6 +612,7 @@ namespace RetrowaveRocket
         {
             ApplyGroundProbes();
             var speedMultiplier = _speedBoostTimer.Value > 0f ? RetrowaveArenaConfig.SpeedBurstMultiplier : 1f;
+            var controlInput = _statusEffects != null ? _statusEffects.ModifyInput(input) : input;
 
             if (_speedBoostTimer.Value > 0f)
             {
@@ -603,36 +631,41 @@ namespace RetrowaveRocket
                     RetrowaveArenaConfig.MaxBoost);
             }
 
-            if (!input.Boost)
+            if (!controlInput.Boost)
             {
                 _boostRequiresRelease = false;
             }
 
             var treatedAsGrounded = _isGrounded || _coyoteTimer > 0f;
 
-            if (treatedAsGrounded || !input.JumpHeld)
+            if (treatedAsGrounded || !controlInput.JumpHeld)
             {
                 _glideRequiresRelease = false;
             }
 
+            if (_statusEffects != null)
+            {
+                speedMultiplier = _statusEffects.ModifyMaxSpeedMultiplier(speedMultiplier);
+            }
+
             if (treatedAsGrounded)
             {
-                SimulateGrounded(input, speedMultiplier);
+                SimulateGrounded(controlInput, speedMultiplier);
             }
             else
             {
-                SimulateAirborne(input);
+                SimulateAirborne(controlInput);
             }
 
-            HandleJump(input, treatedAsGrounded);
-            var isGliding = !treatedAsGrounded && TryApplyGlide(input);
+            HandleJump(controlInput, treatedAsGrounded);
+            var isGliding = !treatedAsGrounded && TryApplyGlide(controlInput);
 
-            if (input.Boost && _boostAmount.Value <= BoostStartThreshold)
+            if (controlInput.Boost && _boostAmount.Value <= BoostStartThreshold)
             {
                 _boostRequiresRelease = true;
             }
 
-            var isBoosting = input.Boost && !_boostRequiresRelease && _boostAmount.Value > BoostStartThreshold;
+            var isBoosting = controlInput.Boost && !_boostRequiresRelease && _boostAmount.Value > BoostStartThreshold;
 
             if (isBoosting)
             {
@@ -1092,7 +1125,7 @@ namespace RetrowaveRocket
             canvasScaler.dynamicPixelsPerUnit = 18f;
 
             var canvasRect = canvasObject.GetComponent<RectTransform>();
-            canvasRect.sizeDelta = new Vector2(220f, 44f);
+            canvasRect.sizeDelta = new Vector2(268f, 48f);
             canvasRect.localScale = Vector3.one * 0.01f;
 
             var textObject = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
@@ -1102,7 +1135,7 @@ namespace RetrowaveRocket
             textRect.anchorMin = Vector2.zero;
             textRect.anchorMax = Vector2.one;
             textRect.offsetMin = Vector2.zero;
-            textRect.offsetMax = Vector2.zero;
+            textRect.offsetMax = new Vector2(-42f, 0f);
 
             _nameTagText = textObject.GetComponent<TextMeshProUGUI>();
             _nameTagText.font = TMP_Settings.defaultFontAsset;
@@ -1111,6 +1144,38 @@ namespace RetrowaveRocket
             _nameTagText.alignment = TextAlignmentOptions.Center;
             _nameTagText.textWrappingMode = TextWrappingModes.NoWrap;
             _nameTagText.text = string.Empty;
+
+            _nameTagPowerUpIconRoot = new GameObject("PowerUp Icon", typeof(RectTransform), typeof(Image));
+            _nameTagPowerUpIconRoot.transform.SetParent(canvasObject.transform, false);
+
+            var iconRect = _nameTagPowerUpIconRoot.GetComponent<RectTransform>();
+            iconRect.anchorMin = new Vector2(1f, 0.5f);
+            iconRect.anchorMax = new Vector2(1f, 0.5f);
+            iconRect.pivot = new Vector2(1f, 0.5f);
+            iconRect.anchoredPosition = new Vector2(-4f, 0f);
+            iconRect.sizeDelta = new Vector2(34f, 34f);
+
+            _nameTagPowerUpIconImage = _nameTagPowerUpIconRoot.GetComponent<Image>();
+            _nameTagPowerUpIconImage.color = new Color(0.1f, 1f, 0.32f, 0.9f);
+
+            var iconTextObject = new GameObject("Icon Label", typeof(RectTransform), typeof(TextMeshProUGUI));
+            iconTextObject.transform.SetParent(_nameTagPowerUpIconRoot.transform, false);
+
+            var iconTextRect = iconTextObject.GetComponent<RectTransform>();
+            iconTextRect.anchorMin = Vector2.zero;
+            iconTextRect.anchorMax = Vector2.one;
+            iconTextRect.offsetMin = Vector2.zero;
+            iconTextRect.offsetMax = Vector2.zero;
+
+            _nameTagPowerUpIconText = iconTextObject.GetComponent<TextMeshProUGUI>();
+            _nameTagPowerUpIconText.font = TMP_Settings.defaultFontAsset;
+            _nameTagPowerUpIconText.fontSize = 23f;
+            _nameTagPowerUpIconText.fontStyle = FontStyles.Bold;
+            _nameTagPowerUpIconText.alignment = TextAlignmentOptions.Center;
+            _nameTagPowerUpIconText.textWrappingMode = TextWrappingModes.NoWrap;
+            _nameTagPowerUpIconText.text = string.Empty;
+            _nameTagPowerUpIconText.color = Color.white;
+            _nameTagPowerUpIconRoot.SetActive(false);
         }
 
         private void RefreshNameTag()
@@ -1132,6 +1197,8 @@ namespace RetrowaveRocket
                 }
             }
 
+            RefreshNameTagPowerUpIcon();
+
             var camera = Camera.main;
 
             if (camera == null)
@@ -1141,6 +1208,59 @@ namespace RetrowaveRocket
 
             _nameTagCanvas.worldCamera = camera;
             _nameTagCanvas.transform.forward = camera.transform.forward;
+        }
+
+        private void RefreshNameTagPowerUpIcon()
+        {
+            if (_nameTagPowerUpIconRoot == null)
+            {
+                return;
+            }
+
+            _rarePowerUpInventory ??= GetComponent<RarePowerUpInventory>();
+            var heldType = _rarePowerUpInventory != null
+                ? _rarePowerUpInventory.HeldType
+                : RetrowaveRarePowerUpType.None;
+
+            if (heldType == RetrowaveRarePowerUpType.None)
+            {
+                _nameTagPowerUpIconRoot.SetActive(false);
+                return;
+            }
+
+            _nameTagPowerUpIconRoot.SetActive(true);
+
+            if (_nameTagPowerUpIconImage != null)
+            {
+                _nameTagPowerUpIconImage.color = GetRarePowerUpColor(heldType);
+            }
+
+            if (_nameTagPowerUpIconText != null)
+            {
+                _nameTagPowerUpIconText.text = GetRarePowerUpIconLabel(heldType);
+            }
+        }
+
+        public static Color GetRarePowerUpColor(RetrowaveRarePowerUpType type)
+        {
+            return type switch
+            {
+                RetrowaveRarePowerUpType.NeonSnareTrail => new Color(0.08f, 1f, 0.28f, 0.92f),
+                RetrowaveRarePowerUpType.GravityBomb => new Color(1f, 0.38f, 0.1f, 0.92f),
+                RetrowaveRarePowerUpType.ChronoDome => new Color(0.32f, 0.72f, 1f, 0.92f),
+                _ => new Color(0.72f, 0.92f, 1f, 0.92f),
+            };
+        }
+
+        public static string GetRarePowerUpIconLabel(RetrowaveRarePowerUpType type)
+        {
+            return type switch
+            {
+                RetrowaveRarePowerUpType.NeonSnareTrail => "N",
+                RetrowaveRarePowerUpType.GravityBomb => "G",
+                RetrowaveRarePowerUpType.ChronoDome => "C",
+                _ => string.Empty,
+            };
         }
 
         private static Material CreateTeamBodyMaterial(Material source, RetrowaveTeam team)

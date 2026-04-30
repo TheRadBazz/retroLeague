@@ -59,6 +59,15 @@ namespace RetrowaveRocket
             }
         }
 
+        public static float SfxVolume
+        {
+            get
+            {
+                EnsureInitialized();
+                return GetFloat(SfxVolumeKey, DefaultSfxVolume);
+            }
+        }
+
         public static bool Fullscreen
         {
             get

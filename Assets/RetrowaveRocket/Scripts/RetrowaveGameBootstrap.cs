@@ -74,6 +74,7 @@ namespace RetrowaveRocket
         private const string YughuesBallMaterialAssetPath = "Assets/YughuesFreeMetalMaterials/Materials/M_YFMeM_49.mat";
         private const string YughuesBallMaterialResourcePath = "RetrowaveRocket/M_YFMeM_49_Ball";
         private const float YughuesBallTextureTiling = 2.2f;
+        private const float RoleSelectionRequestTimeoutSeconds = 2f;
         private static readonly Color BallSurfaceTint = new Color(0.66f, 0.7f, 0.76f, 1f);
         private static readonly Color BallSurfaceEmission = new Color(0.9f, 0.9f, 0.9f, 1f);
 
@@ -86,6 +87,10 @@ namespace RetrowaveRocket
         private GameObject _playerPrefab;
         private GameObject _ballPrefab;
         private GameObject _powerUpPrefab;
+        private GameObject _rarePowerUpBeaconPrefab;
+        private GameObject _neonTrailSegmentPrefab;
+        private GameObject _gravityBombDevicePrefab;
+        private GameObject _chronoDomeFieldPrefab;
         private GameObject _matchManagerPrefab;
         private string _address = "127.0.0.1";
         private string _preferredDisplayName = "Player";
@@ -93,6 +98,8 @@ namespace RetrowaveRocket
         private PendingConnectionMode _pendingConnectionMode;
         private bool _showPauseMenu;
         private bool _showScoreboard;
+        private bool _roleSelectionRequestPending;
+        private float _roleSelectionRequestExpiresAtRealtime;
         private float _defaultFixedDeltaTime;
         private bool _goalCelebrationVisible;
         private float _goalCelebrationEndsAtRealtime;
@@ -148,6 +155,9 @@ namespace RetrowaveRocket
         private TMP_Text _hudSpeedLabelText;
         private TMP_Text _hudBoostValueText;
         private TMP_Text _hudGaugeStatusText;
+        private GameObject _hudRarePowerUpRoot;
+        private Image _hudRarePowerUpIconImage;
+        private TMP_Text _hudRarePowerUpText;
         private Image _hudSpeedFillImage;
         private Image _hudBoostFillImage;
         private RectTransform _hudSpeedBarRect;
@@ -177,6 +187,10 @@ namespace RetrowaveRocket
         public GameObject PlayerPrefab => _playerPrefab;
         public GameObject BallPrefab => _ballPrefab;
         public GameObject PowerUpPrefab => _powerUpPrefab;
+        public GameObject RarePowerUpBeaconPrefab => _rarePowerUpBeaconPrefab;
+        public GameObject NeonTrailSegmentPrefab => _neonTrailSegmentPrefab;
+        public GameObject GravityBombDevicePrefab => _gravityBombDevicePrefab;
+        public GameObject ChronoDomeFieldPrefab => _chronoDomeFieldPrefab;
         public string DefaultAddress => _address;
         public string DefaultPort => _port.ToString();
         public string SuggestedHostAddress => ResolvePreferredAddress();
@@ -248,6 +262,7 @@ namespace RetrowaveRocket
             {
                 _showPauseMenu = false;
                 _showScoreboard = false;
+                ClearPendingRoleSelectionRequest();
                 ClearGoalCelebrationState();
                 ClearPodiumPresentation();
                 SetGameplayMenuVisible(false);
@@ -264,6 +279,7 @@ namespace RetrowaveRocket
             {
                 _showPauseMenu = false;
                 _showScoreboard = false;
+                ClearPendingRoleSelectionRequest();
                 ClearGoalCelebrationState();
                 ClearPodiumPresentation();
                 SetGameplayMenuVisible(false);
@@ -440,6 +456,7 @@ namespace RetrowaveRocket
         {
             _showPauseMenu = false;
             _showScoreboard = false;
+            ClearPendingRoleSelectionRequest();
             ClearGoalCelebrationState();
             ShutdownSession();
 
@@ -491,10 +508,18 @@ namespace RetrowaveRocket
             RegisterNetworkPrefab(_playerPrefab);
             RegisterNetworkPrefab(_ballPrefab);
             RegisterNetworkPrefab(_powerUpPrefab);
+            RegisterNetworkPrefab(_rarePowerUpBeaconPrefab);
+            RegisterNetworkPrefab(_neonTrailSegmentPrefab);
+            RegisterNetworkPrefab(_gravityBombDevicePrefab);
+            RegisterNetworkPrefab(_chronoDomeFieldPrefab);
             RegisterNetworkPrefab(_matchManagerPrefab);
             RegisterRuntimePrefabHandler(_playerPrefab, CreatePlayerInstance);
             RegisterRuntimePrefabHandler(_ballPrefab, CreateBallInstance);
             RegisterRuntimePrefabHandler(_powerUpPrefab, CreatePowerUpInstance);
+            RegisterRuntimePrefabHandler(_rarePowerUpBeaconPrefab, CreateRarePowerUpPickupBeaconInstance);
+            RegisterRuntimePrefabHandler(_neonTrailSegmentPrefab, CreateNeonTrailSegmentInstance);
+            RegisterRuntimePrefabHandler(_gravityBombDevicePrefab, CreateGravityBombDeviceInstance);
+            RegisterRuntimePrefabHandler(_chronoDomeFieldPrefab, CreateChronoDomeFieldInstance);
             RegisterRuntimePrefabHandler(_matchManagerPrefab, CreateMatchManagerInstance);
             _networkManager.NetworkConfig.PlayerPrefab = null;
 
@@ -547,6 +572,10 @@ namespace RetrowaveRocket
             _playerPrefab = CreatePlayerPrefab();
             _ballPrefab = CreateBallPrefab();
             _powerUpPrefab = CreatePowerUpPrefab();
+            _rarePowerUpBeaconPrefab = CreateRarePowerUpPickupBeaconPrefab();
+            _neonTrailSegmentPrefab = CreateNeonTrailSegmentPrefab();
+            _gravityBombDevicePrefab = CreateGravityBombDevicePrefab();
+            _chronoDomeFieldPrefab = CreateChronoDomeFieldPrefab();
             _matchManagerPrefab = CreateMatchManagerPrefab();
         }
 
@@ -679,6 +708,26 @@ namespace RetrowaveRocket
         public GameObject CreatePowerUpInstance()
         {
             return CreatePowerUpPrefab(false);
+        }
+
+        public GameObject CreateRarePowerUpPickupBeaconInstance()
+        {
+            return CreateRarePowerUpPickupBeaconPrefab(false);
+        }
+
+        public GameObject CreateNeonTrailSegmentInstance()
+        {
+            return CreateNeonTrailSegmentPrefab(false);
+        }
+
+        public GameObject CreateGravityBombDeviceInstance()
+        {
+            return CreateGravityBombDevicePrefab(false);
+        }
+
+        public GameObject CreateChronoDomeFieldInstance()
+        {
+            return CreateChronoDomeFieldPrefab(false);
         }
 
         public GameObject CreateMatchManagerInstance()
@@ -1293,6 +1342,41 @@ namespace RetrowaveRocket
                 new Vector2(170f, 24f),
                 new Color(0.57f, 0.86f, 1f, 0.95f));
 
+            _hudRarePowerUpRoot = CreateHudPanel(
+                gaugesPanel.transform,
+                "RarePowerUpIndicator",
+                new Vector2(1f, 1f),
+                new Vector2(1f, 1f),
+                new Vector2(1f, 1f),
+                new Vector2(-20f, -46f),
+                new Vector2(184f, 32f),
+                new Color(0.03f, 0.08f, 0.12f, 0.86f),
+                new Color(0.12f, 1f, 0.4f, 0.42f));
+
+            var rareIcon = CreateUiObject("RareIcon", _hudRarePowerUpRoot.transform, typeof(RectTransform), typeof(Image));
+            var rareIconRect = rareIcon.GetComponent<RectTransform>();
+            rareIconRect.anchorMin = new Vector2(0f, 0.5f);
+            rareIconRect.anchorMax = new Vector2(0f, 0.5f);
+            rareIconRect.pivot = new Vector2(0f, 0.5f);
+            rareIconRect.anchoredPosition = new Vector2(7f, 0f);
+            rareIconRect.sizeDelta = new Vector2(22f, 22f);
+            _hudRarePowerUpIconImage = rareIcon.GetComponent<Image>();
+
+            _hudRarePowerUpText = CreateHudText(
+                _hudRarePowerUpRoot.transform,
+                "RareLabel",
+                "ARMED",
+                13f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Left,
+                new Vector2(0f, 0.5f),
+                new Vector2(0f, 0.5f),
+                new Vector2(0f, 0.5f),
+                new Vector2(36f, 0f),
+                new Vector2(138f, 24f),
+                Color.white);
+            _hudRarePowerUpRoot.SetActive(false);
+
             _hudSpeedValueText = CreateHudText(
                 gaugesPanel.transform,
                 "SpeedValue",
@@ -1560,6 +1644,9 @@ namespace RetrowaveRocket
             _hudSpeedLabelText = null;
             _hudBoostValueText = null;
             _hudGaugeStatusText = null;
+            _hudRarePowerUpRoot = null;
+            _hudRarePowerUpIconImage = null;
+            _hudRarePowerUpText = null;
             _hudSpeedFillImage = null;
             _hudBoostFillImage = null;
             _hudSpeedBarRect = null;
@@ -1797,9 +1884,16 @@ namespace RetrowaveRocket
 
                 if (_hudGaugeStatusText != null)
                 {
-                    _hudGaugeStatusText.text = localPlayer.HasSpeedBoost
-                        ? "Speed burst"
-                        : (localPlayer.IsGroundedForHud ? "Grounded" : "Airborne");
+                    var hasRarePowerUp = localPlayer.TryGetComponent<RarePowerUpInventory>(out var rareInventory)
+                                         && rareInventory.HasHeldPowerUp;
+                    var heldType = hasRarePowerUp ? rareInventory.HeldType : RetrowaveRarePowerUpType.None;
+                    _hudGaugeStatusText.text = hasRarePowerUp
+                        ? $"Armed: {GetRarePowerUpLabel(heldType)}"
+                        : localPlayer.HasSpeedBoost
+                            ? "Speed burst"
+                            : (localPlayer.IsGroundedForHud ? "Grounded" : "Airborne");
+
+                    RefreshHudRarePowerUpIndicator(heldType);
                 }
 
                 if (_hudSpeedFillImage != null)
@@ -1836,6 +1930,8 @@ namespace RetrowaveRocket
                 {
                     _hudGaugeStatusText.text = RetrowaveCameraRig.GetSpectatorCameraLabel();
                 }
+
+                RefreshHudRarePowerUpIndicator(RetrowaveRarePowerUpType.None);
 
                 if (_hudSpeedFillImage != null)
                 {
@@ -2378,8 +2474,11 @@ namespace RetrowaveRocket
 
         private void SelectGameplayRole(RetrowaveLobbyRole role)
         {
-            TryRequestRoleSelection(role);
-            _showPauseMenu = false;
+            if (TryRequestRoleSelection(role))
+            {
+                _showPauseMenu = false;
+                SetGameplayMenuVisible(false);
+            }
         }
 
         private void HandleGameplayStartMatch()
@@ -3229,8 +3328,10 @@ namespace RetrowaveRocket
                 return;
             }
 
-            TryRequestRoleSelection(role);
-            _showPauseMenu = false;
+            if (TryRequestRoleSelection(role))
+            {
+                _showPauseMenu = false;
+            }
         }
 
         private void DrawScoreboard()
@@ -3425,12 +3526,56 @@ namespace RetrowaveRocket
 
         private bool RequiresRoleSelection()
         {
-            if (RetrowavePlayerController.LocalPlayer != null)
+            if (HasConfirmedRoleSelection())
             {
-                return !RetrowavePlayerController.LocalPlayer.HasSelectedRole;
+                ClearPendingRoleSelectionRequest();
+                return false;
             }
 
-            return TryGetLocalLobbyEntry(out var entry) && !entry.HasSelectedRole;
+            if (HasPendingRoleSelectionRequest())
+            {
+                return false;
+            }
+
+            return RetrowavePlayerController.LocalPlayer != null || TryGetLocalLobbyEntry(out _);
+        }
+
+        private bool HasConfirmedRoleSelection()
+        {
+            if (RetrowavePlayerController.LocalPlayer != null && RetrowavePlayerController.LocalPlayer.HasSelectedRole)
+            {
+                return true;
+            }
+
+            return TryGetLocalLobbyEntry(out var entry) && entry.HasSelectedRole;
+        }
+
+        private bool HasPendingRoleSelectionRequest()
+        {
+            if (!_roleSelectionRequestPending)
+            {
+                return false;
+            }
+
+            if (Time.unscaledTime <= _roleSelectionRequestExpiresAtRealtime)
+            {
+                return true;
+            }
+
+            ClearPendingRoleSelectionRequest();
+            return false;
+        }
+
+        private void MarkRoleSelectionRequestPending()
+        {
+            _roleSelectionRequestPending = true;
+            _roleSelectionRequestExpiresAtRealtime = Time.unscaledTime + RoleSelectionRequestTimeoutSeconds;
+        }
+
+        private void ClearPendingRoleSelectionRequest()
+        {
+            _roleSelectionRequestPending = false;
+            _roleSelectionRequestExpiresAtRealtime = 0f;
         }
 
         private bool ShouldBlockGameplayInput()
@@ -3448,6 +3593,46 @@ namespace RetrowaveRocket
         private static string GetTeamLabel(RetrowaveTeam team)
         {
             return team == RetrowaveTeam.Blue ? "Blue Team" : "Pink Team";
+        }
+
+        private static string GetRarePowerUpLabel(RetrowaveRarePowerUpType type)
+        {
+            return type switch
+            {
+                RetrowaveRarePowerUpType.NeonSnareTrail => "Neon snare",
+                RetrowaveRarePowerUpType.GravityBomb => "Gravity bomb",
+                RetrowaveRarePowerUpType.ChronoDome => "Chrono dome",
+                _ => "None",
+            };
+        }
+
+        private void RefreshHudRarePowerUpIndicator(RetrowaveRarePowerUpType type)
+        {
+            if (_hudRarePowerUpRoot == null)
+            {
+                return;
+            }
+
+            var isArmed = type != RetrowaveRarePowerUpType.None;
+            _hudRarePowerUpRoot.SetActive(isArmed);
+
+            if (!isArmed)
+            {
+                return;
+            }
+
+            var color = RetrowavePlayerController.GetRarePowerUpColor(type);
+
+            if (_hudRarePowerUpIconImage != null)
+            {
+                _hudRarePowerUpIconImage.color = color;
+            }
+
+            if (_hudRarePowerUpText != null)
+            {
+                _hudRarePowerUpText.text = $"ARMED {RetrowavePlayerController.GetRarePowerUpIconLabel(type)}";
+                _hudRarePowerUpText.color = Color.Lerp(color, Color.white, 0.18f);
+            }
         }
 
         private static string GetRoleLabel(RetrowaveLobbyEntry entry)
@@ -3517,6 +3702,7 @@ namespace RetrowaveRocket
             if (RetrowavePlayerController.LocalPlayer != null)
             {
                 RetrowavePlayerController.LocalPlayer.RequestRoleSelection(role);
+                MarkRoleSelectionRequestPending();
                 return true;
             }
 
@@ -3525,6 +3711,7 @@ namespace RetrowaveRocket
             if (matchManager != null)
             {
                 matchManager.RequestRoleSelection(role);
+                MarkRoleSelectionRequestPending();
                 return true;
             }
 
@@ -3855,7 +4042,12 @@ namespace RetrowaveRocket
             prefab.AddComponent<NetworkObject>();
             prefab.AddComponent<NetworkTransform>();
             prefab.AddComponent<NetworkRigidbody>();
+            prefab.AddComponent<VehicleStatusEffects>();
             prefab.AddComponent<RetrowavePlayerController>();
+            prefab.AddComponent<RarePowerUpInventory>();
+            prefab.AddComponent<NeonSnareTrailPowerUp>();
+            prefab.AddComponent<GravityBombPowerUp>();
+            prefab.AddComponent<ChronoDomePowerUp>();
 
             if (!TryAttachSportCarVisual(prefab.transform))
             {
@@ -4002,12 +4194,69 @@ namespace RetrowaveRocket
             return prefab;
         }
 
+        private static GameObject CreateRarePowerUpPickupBeaconPrefab(bool isTemplate = true)
+        {
+            var prefab = new GameObject("RT Rare PowerUp Beacon");
+            prefab.SetActive(false);
+            var collider = prefab.AddComponent<SphereCollider>();
+            collider.isTrigger = true;
+            collider.radius = 3f;
+            prefab.AddComponent<NetworkObject>();
+            prefab.AddComponent<NetworkTransform>();
+            prefab.AddComponent<RarePowerUpPickupBeacon>();
+            FinalizeRuntimePrefab(prefab, 0xA1000005u, isTemplate);
+            return prefab;
+        }
+
+        private static GameObject CreateNeonTrailSegmentPrefab(bool isTemplate = true)
+        {
+            var prefab = new GameObject("RT Neon Trail Segment");
+            prefab.SetActive(false);
+            var collider = prefab.AddComponent<BoxCollider>();
+            collider.isTrigger = true;
+            collider.size = new Vector3(1.85f, 1.4f, 1.35f);
+            prefab.AddComponent<NetworkObject>();
+            prefab.AddComponent<NetworkTransform>();
+            prefab.AddComponent<NeonTrailSegment>();
+            FinalizeRuntimePrefab(prefab, 0xA1000006u, isTemplate);
+            return prefab;
+        }
+
+        private static GameObject CreateGravityBombDevicePrefab(bool isTemplate = true)
+        {
+            var prefab = new GameObject("RT Gravity Bomb Device");
+            prefab.SetActive(false);
+            var collider = prefab.AddComponent<SphereCollider>();
+            collider.isTrigger = true;
+            collider.radius = 9f;
+            prefab.AddComponent<NetworkObject>();
+            prefab.AddComponent<NetworkTransform>();
+            prefab.AddComponent<GravityBombDevice>();
+            FinalizeRuntimePrefab(prefab, 0xA1000007u, isTemplate);
+            return prefab;
+        }
+
+        private static GameObject CreateChronoDomeFieldPrefab(bool isTemplate = true)
+        {
+            var prefab = new GameObject("RT Chrono Dome Field");
+            prefab.SetActive(false);
+            var collider = prefab.AddComponent<SphereCollider>();
+            collider.isTrigger = true;
+            collider.radius = 10f;
+            prefab.AddComponent<NetworkObject>();
+            prefab.AddComponent<NetworkTransform>();
+            prefab.AddComponent<ChronoDomeField>();
+            FinalizeRuntimePrefab(prefab, 0xA1000008u, isTemplate);
+            return prefab;
+        }
+
         private static GameObject CreateMatchManagerPrefab(bool isTemplate = true)
         {
             var prefab = new GameObject("RT Match Manager");
             prefab.SetActive(false);
             prefab.AddComponent<NetworkObject>();
             prefab.AddComponent<RetrowaveMatchManager>();
+            prefab.AddComponent<RarePowerUpSpawner>();
             FinalizeRuntimePrefab(prefab, 0xA1000004u, isTemplate);
             return prefab;
         }
