@@ -54,7 +54,7 @@ namespace RetrowaveRocket
                 owner.OwnerClientId,
                 owner.Team,
                 _radius,
-                _duration,
+                _duration * owner.StatusEffectDurationMultiplier,
                 _enemyMovementMultiplier,
                 _enemySteeringMultiplier,
                 _affectFriendlyPlayers,

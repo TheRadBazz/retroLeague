@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using TMPro;
 using Unity.Netcode;
 using UnityEngine;
 
@@ -11,6 +12,7 @@ namespace RetrowaveRocket
     public sealed class RarePowerUpPickupBeacon : NetworkBehaviour
     {
         private const float GroundRingCenterOffset = 0.045f;
+        private static readonly List<RarePowerUpPickupBeacon> ActiveBeacons = new();
 
         private readonly NetworkVariable<int> _heldType = new(
             (int)RetrowaveRarePowerUpType.None,
@@ -55,6 +57,7 @@ namespace RetrowaveRocket
         private MeshRenderer _orbRenderer;
         private MeshRenderer _ringRenderer;
         private Light _glow;
+        private TextMeshPro _label;
         private Material _orbMaterial;
         private Material _ringMaterial;
         private RarePowerUpSpawner _spawner;
@@ -69,6 +72,7 @@ namespace RetrowaveRocket
         public ulong CapturingClientId => _capturingClientId.Value;
         public float Radius => _syncedRadius.Value;
         public bool RequiresCapture => _requiresCapture.Value;
+        public static IReadOnlyList<RarePowerUpPickupBeacon> Active => ActiveBeacons;
 
         private void Awake()
         {
@@ -85,6 +89,7 @@ namespace RetrowaveRocket
             _captureProgress.OnValueChanged += HandleCaptureChanged;
             _syncedRadius.OnValueChanged += HandleCaptureChanged;
             _requiresCapture.OnValueChanged += HandleStateChanged;
+            RegisterActiveBeacon();
             RefreshVisuals();
             BeaconStateChanged?.Invoke(this, IsActive, HeldType);
 
@@ -101,6 +106,7 @@ namespace RetrowaveRocket
             _captureProgress.OnValueChanged -= HandleCaptureChanged;
             _syncedRadius.OnValueChanged -= HandleCaptureChanged;
             _requiresCapture.OnValueChanged -= HandleStateChanged;
+            ActiveBeacons.Remove(this);
             BeaconStateChanged?.Invoke(this, false, HeldType);
             base.OnNetworkDespawn();
         }
@@ -126,6 +132,16 @@ namespace RetrowaveRocket
                 var progress = RequiresCapture ? Mathf.Max(0.08f, CaptureProgress) : 1f;
                 _ringRenderer.transform.localPosition = ResolveGroundRingLocalPosition();
                 _ringRenderer.transform.localScale = new Vector3(radius * 2f * progress, 0.04f, radius * 2f * progress);
+            }
+
+            if (_label != null)
+            {
+                var camera = Camera.main;
+
+                if (camera != null)
+                {
+                    _label.transform.forward = camera.transform.forward;
+                }
             }
         }
 
@@ -338,12 +354,14 @@ namespace RetrowaveRocket
 
         private void HandleStateChanged(int _, int __)
         {
+            RegisterActiveBeacon();
             RefreshVisuals();
             BeaconStateChanged?.Invoke(this, IsActive, HeldType);
         }
 
         private void HandleStateChanged(bool _, bool __)
         {
+            RegisterActiveBeacon();
             RefreshVisuals();
             BeaconStateChanged?.Invoke(this, IsActive, HeldType);
         }
@@ -355,6 +373,8 @@ namespace RetrowaveRocket
 
         private void RefreshVisuals()
         {
+            var color = ResolveColor(HeldType);
+
             if (_trigger != null)
             {
                 _radius = Mathf.Max(0.5f, Radius);
@@ -376,10 +396,15 @@ namespace RetrowaveRocket
             if (_glow != null)
             {
                 _glow.enabled = IsActive;
-                _glow.color = ResolveColor(HeldType);
+                _glow.color = color;
             }
 
-            var color = ResolveColor(HeldType);
+            if (_label != null)
+            {
+                _label.gameObject.SetActive(IsActive);
+                _label.color = Color.Lerp(color, Color.white, 0.18f);
+                _label.text = $"{ResolveLabel(HeldType).ToUpperInvariant()}\n{(RequiresCapture ? $"CAPTURE {Mathf.RoundToInt(CaptureProgress * 100f)}%" : "PICKUP READY")}";
+            }
 
             if (_orbMaterial != null)
             {
@@ -422,6 +447,31 @@ namespace RetrowaveRocket
             _glow.type = LightType.Point;
             _glow.range = 13f;
             _glow.intensity = 9f;
+
+            var labelObject = new GameObject("Rare Beacon Label");
+            labelObject.transform.SetParent(transform, false);
+            labelObject.transform.localPosition = Vector3.up * 2.15f;
+            _label = labelObject.AddComponent<TextMeshPro>();
+            _label.font = TMP_Settings.defaultFontAsset;
+            _label.fontSize = 1.65f;
+            _label.fontStyle = FontStyles.Bold;
+            _label.alignment = TextAlignmentOptions.Center;
+            _label.textWrappingMode = TextWrappingModes.NoWrap;
+        }
+
+        private void RegisterActiveBeacon()
+        {
+            if (IsActive)
+            {
+                if (!ActiveBeacons.Contains(this))
+                {
+                    ActiveBeacons.Add(this);
+                }
+            }
+            else
+            {
+                ActiveBeacons.Remove(this);
+            }
         }
 
         private Vector3 ResolveGroundRingLocalPosition()
@@ -439,6 +489,17 @@ namespace RetrowaveRocket
                 RetrowaveRarePowerUpType.GravityBomb => new Color(1f, 0.38f, 0.1f, 1f),
                 RetrowaveRarePowerUpType.ChronoDome => new Color(0.32f, 0.72f, 1f, 1f),
                 _ => Color.white,
+            };
+        }
+
+        private static string ResolveLabel(RetrowaveRarePowerUpType type)
+        {
+            return type switch
+            {
+                RetrowaveRarePowerUpType.NeonSnareTrail => "Neon snare",
+                RetrowaveRarePowerUpType.GravityBomb => "Gravity bomb",
+                RetrowaveRarePowerUpType.ChronoDome => "Chrono dome",
+                _ => "Rare power",
             };
         }
 

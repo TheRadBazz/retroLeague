@@ -118,6 +118,10 @@ namespace RetrowaveRocket
         private Button _gameplayBlueButton;
         private Button _gameplayPinkButton;
         private Button _gameplaySpectateButton;
+        private Button _gameplayStrikerButton;
+        private Button _gameplayDefenderButton;
+        private Button _gameplayRunnerButton;
+        private Button _gameplayDisruptorButton;
         private Button _gameplayResumeButton;
         private Button _gameplayStartButton;
         private Button _gameplayReturnButton;
@@ -150,20 +154,38 @@ namespace RetrowaveRocket
         private TMP_Text _hudInfoRoleText;
         private TMP_Text _hudInfoHintText;
         private TMP_Text _hudInfoCollapsedText;
+        private GameObject _hudStyleNotificationRoot;
+        private TMP_Text _hudStyleNotificationText;
         private TMP_Text _hudGaugeTitleText;
         private TMP_Text _hudSpeedValueText;
         private TMP_Text _hudSpeedLabelText;
         private TMP_Text _hudBoostValueText;
+        private TMP_Text _hudHeatValueText;
+        private TMP_Text _hudStyleValueText;
         private TMP_Text _hudGaugeStatusText;
         private GameObject _hudRarePowerUpRoot;
         private Image _hudRarePowerUpIconImage;
         private TMP_Text _hudRarePowerUpText;
+        private GameObject _hudObjectivePointerRoot;
+        private RectTransform _hudObjectivePointerArrowRect;
+        private TMP_Text _hudObjectivePointerArrowText;
+        private TMP_Text _hudObjectivePointerText;
+        private GameObject _hudRareBeaconPointerRoot;
+        private RectTransform _hudRareBeaconPointerArrowRect;
+        private TMP_Text _hudRareBeaconPointerArrowText;
+        private TMP_Text _hudRareBeaconPointerText;
         private Image _hudSpeedFillImage;
         private Image _hudBoostFillImage;
+        private Image _hudHeatFillImage;
+        private Image _hudStyleFillImage;
         private RectTransform _hudSpeedBarRect;
         private RectTransform _hudBoostBarRect;
+        private RectTransform _hudHeatBarRect;
+        private RectTransform _hudStyleBarRect;
         private RectTransform _hudSpeedMarkerRect;
         private RectTransform _hudBoostMarkerRect;
+        private RectTransform _hudHeatMarkerRect;
+        private RectTransform _hudStyleMarkerRect;
         private TMP_Text _hudScoreboardTitleText;
         private TMP_Text _hudScoreboardSummaryText;
         private TMP_Text _hudScoreboardBlueText;
@@ -177,6 +199,8 @@ namespace RetrowaveRocket
         private bool _gameplayHudSessionVisible;
         private bool _hudInfoIntroAutoHidePending;
         private float _hudInfoIntroHideAtRealtime;
+        private int _observedStyleAwardSerial;
+        private float _styleNotificationHideAtRealtime;
         private GameObject _podiumPresentationRoot;
         private bool _podiumCameraActive;
         private bool _sessionShutdownInProgress;
@@ -347,17 +371,49 @@ namespace RetrowaveRocket
                 return;
             }
 
+            if (RequiresUtilityRoleSelection())
+            {
+                if (keyboard.digit1Key.wasPressedThisFrame || keyboard.numpad1Key.wasPressedThisFrame)
+                {
+                    TryRequestUtilityRoleSelection(RetrowaveUtilityRole.Striker);
+                    _showPauseMenu = false;
+                    return;
+                }
+
+                if (keyboard.digit2Key.wasPressedThisFrame || keyboard.numpad2Key.wasPressedThisFrame)
+                {
+                    TryRequestUtilityRoleSelection(RetrowaveUtilityRole.Defender);
+                    _showPauseMenu = false;
+                    return;
+                }
+
+                if (keyboard.digit3Key.wasPressedThisFrame || keyboard.numpad3Key.wasPressedThisFrame)
+                {
+                    TryRequestUtilityRoleSelection(RetrowaveUtilityRole.Runner);
+                    _showPauseMenu = false;
+                    return;
+                }
+
+                if (keyboard.digit4Key.wasPressedThisFrame || keyboard.numpad4Key.wasPressedThisFrame)
+                {
+                    TryRequestUtilityRoleSelection(RetrowaveUtilityRole.Disruptor);
+                    _showPauseMenu = false;
+                }
+
+                return;
+            }
+
             if (keyboard.digit1Key.wasPressedThisFrame || keyboard.numpad1Key.wasPressedThisFrame || keyboard.bKey.wasPressedThisFrame)
             {
                 TryRequestRoleSelection(RetrowaveLobbyRole.Blue);
-                _showPauseMenu = false;
+                _showPauseMenu = true;
                 return;
             }
 
             if (keyboard.digit2Key.wasPressedThisFrame || keyboard.numpad2Key.wasPressedThisFrame || keyboard.pKey.wasPressedThisFrame)
             {
                 TryRequestRoleSelection(RetrowaveLobbyRole.Pink);
-                _showPauseMenu = false;
+                _showPauseMenu = true;
                 return;
             }
 
@@ -880,6 +936,10 @@ namespace RetrowaveRocket
             _gameplayBlueButton = CreateMenuButton(panel.transform, "BlueButton", "Join Blue Team", new Vector2(0f, 48f), new Color(0.07f, 0.44f, 0.93f, 1f), () => SelectGameplayRole(RetrowaveLobbyRole.Blue));
             _gameplayPinkButton = CreateMenuButton(panel.transform, "PinkButton", "Join Pink Team", new Vector2(0f, -20f), RetrowaveStyle.PinkBase, () => SelectGameplayRole(RetrowaveLobbyRole.Pink));
             _gameplaySpectateButton = CreateMenuButton(panel.transform, "SpectateButton", "Spectate", new Vector2(0f, -88f), new Color(0.34f, 0.18f, 0.46f, 1f), () => SelectGameplayRole(RetrowaveLobbyRole.Spectator));
+            _gameplayStrikerButton = CreateMenuButton(panel.transform, "StrikerButton", "Striker", new Vector2(-172f, 28f), RetrowaveUtilityRoleCatalog.GetColor(RetrowaveUtilityRole.Striker), () => SelectUtilityRole(RetrowaveUtilityRole.Striker));
+            _gameplayDefenderButton = CreateMenuButton(panel.transform, "DefenderButton", "Defender", new Vector2(172f, 28f), RetrowaveUtilityRoleCatalog.GetColor(RetrowaveUtilityRole.Defender), () => SelectUtilityRole(RetrowaveUtilityRole.Defender));
+            _gameplayRunnerButton = CreateMenuButton(panel.transform, "RunnerButton", "Runner", new Vector2(-172f, -50f), RetrowaveUtilityRoleCatalog.GetColor(RetrowaveUtilityRole.Runner), () => SelectUtilityRole(RetrowaveUtilityRole.Runner));
+            _gameplayDisruptorButton = CreateMenuButton(panel.transform, "DisruptorButton", "Disruptor", new Vector2(172f, -50f), RetrowaveUtilityRoleCatalog.GetColor(RetrowaveUtilityRole.Disruptor), () => SelectUtilityRole(RetrowaveUtilityRole.Disruptor));
             _gameplayStartButton = CreateMenuButton(panel.transform, "StartButton", "Start Match", new Vector2(0f, -164f), new Color(0.14f, 0.64f, 0.42f, 1f), HandleGameplayStartMatch);
             _gameplayStartButtonLabel = _gameplayStartButton.GetComponentInChildren<TextMeshProUGUI>(true);
             _gameplayResumeButton = CreateMenuButton(panel.transform, "ResumeButton", "Resume", new Vector2(-132f, -242f), new Color(0.12f, 0.24f, 0.36f, 1f), HandleGameplayResume);
@@ -913,6 +973,10 @@ namespace RetrowaveRocket
             _gameplayBlueButton = null;
             _gameplayPinkButton = null;
             _gameplaySpectateButton = null;
+            _gameplayStrikerButton = null;
+            _gameplayDefenderButton = null;
+            _gameplayRunnerButton = null;
+            _gameplayDisruptorButton = null;
             _gameplayResumeButton = null;
             _gameplayStartButton = null;
             _gameplayReturnButton = null;
@@ -959,6 +1023,7 @@ namespace RetrowaveRocket
 
             var sessionBootstrapPending = RequiresSessionBootstrap();
             var forceSelection = RequiresRoleSelection();
+            var choosingUtility = IsChoosingUtilityRole();
             var wasVisible = _gameplayMenuWasVisible;
             var matchManager = GetActiveMatchManager();
             var podiumActive = matchManager != null && matchManager.IsPodium;
@@ -998,13 +1063,17 @@ namespace RetrowaveRocket
             }
             else
             {
-                _gameplayMenuTitleText.text = forceSelection ? "Choose Your Role" : "Match Menu";
-                _gameplayMenuBodyText.text = forceSelection
-                    ? "Pick blue, pink, or spectator before jumping fully into the lobby."
-                    : "Swap teams, spectate, or control the match flow from here.";
-                _gameplayMenuHintText.text = forceSelection
-                    ? "Keyboard also works: 1 / B = Blue, 2 / P = Pink, 3 / S = Spectator"
-                    : "Esc closes this menu after you've chosen a role.";
+                _gameplayMenuTitleText.text = choosingUtility ? "Choose Utility Role" : (forceSelection ? "Choose Your Role" : "Match Menu");
+                _gameplayMenuBodyText.text = choosingUtility
+                    ? "Pick a subtle vehicle identity for this team. Roles give small edges without replacing skill."
+                    : (forceSelection
+                        ? "Pick blue, pink, or spectator before jumping fully into the lobby."
+                        : "Swap teams, spectate, or control the match flow from here.");
+                _gameplayMenuHintText.text = choosingUtility
+                    ? "1 Striker: stronger shots  •  2 Defender: clears/grip  •  3 Runner: boost efficiency  •  4 Disruptor: longer effects"
+                    : (forceSelection
+                        ? "Keyboard also works: 1 / B = Blue, 2 / P = Pink, 3 / S = Spectator"
+                        : "Esc closes this menu after you've chosen a role.");
             }
 
             var hostCanStart = false;
@@ -1018,7 +1087,14 @@ namespace RetrowaveRocket
                 hostCanStart = localEntry.IsHost && matchManager.CanStartMatch;
             }
 
-            _gameplayStartButton.gameObject.SetActive(hostIsPresent);
+            _gameplayStartButton.gameObject.SetActive(hostIsPresent && !forceSelection);
+            _gameplayBlueButton.gameObject.SetActive(!choosingUtility);
+            _gameplayPinkButton.gameObject.SetActive(!choosingUtility);
+            _gameplaySpectateButton.gameObject.SetActive(!choosingUtility);
+            _gameplayStrikerButton.gameObject.SetActive(choosingUtility);
+            _gameplayDefenderButton.gameObject.SetActive(choosingUtility);
+            _gameplayRunnerButton.gameObject.SetActive(choosingUtility);
+            _gameplayDisruptorButton.gameObject.SetActive(choosingUtility);
             _gameplayResumeButton.gameObject.SetActive(!forceSelection && !sessionBootstrapPending && !matchComplete);
             _gameplaySettingsButton.gameObject.SetActive(!sessionBootstrapPending);
             ApplyGameplayMenuLayout(matchComplete);
@@ -1038,6 +1114,10 @@ namespace RetrowaveRocket
             _gameplayBlueButton.interactable = canSubmitRoleSelection;
             _gameplayPinkButton.interactable = canSubmitRoleSelection;
             _gameplaySpectateButton.interactable = canSubmitRoleSelection;
+            _gameplayStrikerButton.interactable = RetrowavePlayerController.LocalPlayer != null;
+            _gameplayDefenderButton.interactable = RetrowavePlayerController.LocalPlayer != null;
+            _gameplayRunnerButton.interactable = RetrowavePlayerController.LocalPlayer != null;
+            _gameplayDisruptorButton.interactable = RetrowavePlayerController.LocalPlayer != null;
 
             if (sessionBootstrapPending)
             {
@@ -1055,7 +1135,9 @@ namespace RetrowaveRocket
             }
             else if (forceSelection)
             {
-                _gameplayMenuFooterText.text = "Use the buttons above to enter the arena.";
+                _gameplayMenuFooterText.text = choosingUtility
+                    ? "Your role icon appears beside your name tag and in your driver HUD."
+                    : "Use the buttons above to enter the arena.";
             }
             else if (hasLocalEntry && localEntry.QueuedForNextRound)
             {
@@ -1074,7 +1156,9 @@ namespace RetrowaveRocket
 
             if (!wasVisible)
             {
-                var defaultButton = forceSelection ? _gameplayBlueButton : (_gameplayResumeButton.gameObject.activeSelf ? _gameplayResumeButton : _gameplayBlueButton);
+                var defaultButton = choosingUtility
+                    ? _gameplayStrikerButton
+                    : (forceSelection ? _gameplayBlueButton : (_gameplayResumeButton.gameObject.activeSelf ? _gameplayResumeButton : _gameplayBlueButton));
                 var eventSystem = FindFirstObjectByType<EventSystem>();
 
                 if (eventSystem != null && defaultButton != null)
@@ -1182,6 +1266,110 @@ namespace RetrowaveRocket
                 new Vector2(176f, -6f),
                 new Vector2(110f, 56f),
                 RetrowaveStyle.PinkBase);
+
+            _hudStyleNotificationRoot = CreateHudPanel(
+                _gameplayHudRoot.transform,
+                "StyleNotification",
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0f, -148f),
+                new Vector2(520f, 58f),
+                new Color(0.02f, 0.05f, 0.08f, 0.78f),
+                new Color(0.42f, 1f, 0.72f, 0.45f));
+
+            _hudStyleNotificationText = CreateHudText(
+                _hudStyleNotificationRoot.transform,
+                "Text",
+                string.Empty,
+                23f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Center,
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                Vector2.zero,
+                new Vector2(480f, 40f),
+                new Color(0.74f, 1f, 0.82f, 1f));
+            _hudStyleNotificationRoot.SetActive(false);
+
+            _hudObjectivePointerRoot = CreateHudPanel(
+                _gameplayHudRoot.transform,
+                "ObjectivePointer",
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(-176f, -218f),
+                new Vector2(320f, 52f),
+                new Color(0.02f, 0.06f, 0.1f, 0.82f),
+                new Color(1f, 0.72f, 0.16f, 0.46f));
+            _hudObjectivePointerArrowText = CreateHudText(
+                _hudObjectivePointerRoot.transform,
+                "Arrow",
+                "▲",
+                25f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Center,
+                new Vector2(0f, 0.5f),
+                new Vector2(0f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(28f, 0f),
+                new Vector2(32f, 32f),
+                new Color(1f, 0.72f, 0.16f, 1f));
+            _hudObjectivePointerArrowRect = _hudObjectivePointerArrowText.rectTransform;
+            _hudObjectivePointerText = CreateHudText(
+                _hudObjectivePointerRoot.transform,
+                "Label",
+                string.Empty,
+                14f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Left,
+                new Vector2(0f, 0.5f),
+                new Vector2(0f, 0.5f),
+                new Vector2(0f, 0.5f),
+                new Vector2(54f, 0f),
+                new Vector2(248f, 38f),
+                Color.white);
+            _hudObjectivePointerRoot.SetActive(false);
+
+            _hudRareBeaconPointerRoot = CreateHudPanel(
+                _gameplayHudRoot.transform,
+                "RareBeaconPointer",
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(176f, -218f),
+                new Vector2(320f, 52f),
+                new Color(0.02f, 0.06f, 0.1f, 0.82f),
+                new Color(0.42f, 1f, 0.72f, 0.46f));
+            _hudRareBeaconPointerArrowText = CreateHudText(
+                _hudRareBeaconPointerRoot.transform,
+                "Arrow",
+                "▲",
+                25f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Center,
+                new Vector2(0f, 0.5f),
+                new Vector2(0f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(28f, 0f),
+                new Vector2(32f, 32f),
+                new Color(0.42f, 1f, 0.72f, 1f));
+            _hudRareBeaconPointerArrowRect = _hudRareBeaconPointerArrowText.rectTransform;
+            _hudRareBeaconPointerText = CreateHudText(
+                _hudRareBeaconPointerRoot.transform,
+                "Label",
+                string.Empty,
+                14f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Left,
+                new Vector2(0f, 0.5f),
+                new Vector2(0f, 0.5f),
+                new Vector2(0f, 0.5f),
+                new Vector2(54f, 0f),
+                new Vector2(248f, 38f),
+                Color.white);
+            _hudRareBeaconPointerRoot.SetActive(false);
 
             _gameplayHudInfoRoot = CreateHudPanel(
                 _gameplayHudRoot.transform,
@@ -1310,7 +1498,7 @@ namespace RetrowaveRocket
                 new Vector2(1f, 0f),
                 new Vector2(1f, 0f),
                 new Vector2(-28f, 28f),
-                new Vector2(430f, 196f),
+                new Vector2(430f, 260f),
                 new Color(0.03f, 0.05f, 0.11f, 0.9f),
                 new Color(0.96f, 0.34f, 0.74f, 0.28f));
 
@@ -1349,7 +1537,7 @@ namespace RetrowaveRocket
                 new Vector2(1f, 1f),
                 new Vector2(1f, 1f),
                 new Vector2(-20f, -46f),
-                new Vector2(184f, 32f),
+                new Vector2(220f, 32f),
                 new Color(0.03f, 0.08f, 0.12f, 0.86f),
                 new Color(0.12f, 1f, 0.4f, 0.42f));
 
@@ -1373,7 +1561,7 @@ namespace RetrowaveRocket
                 new Vector2(0f, 0.5f),
                 new Vector2(0f, 0.5f),
                 new Vector2(36f, 0f),
-                new Vector2(138f, 24f),
+                new Vector2(176f, 24f),
                 Color.white);
             _hudRarePowerUpRoot.SetActive(false);
 
@@ -1454,6 +1642,56 @@ namespace RetrowaveRocket
                 out _hudBoostFillImage,
                 out _hudBoostBarRect,
                 out _hudBoostMarkerRect);
+
+            _hudHeatValueText = CreateHudText(
+                gaugesPanel.transform,
+                "HeatValue",
+                "HEAT 0%",
+                14f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Left,
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(24f, -192f),
+                new Vector2(170f, 22f),
+                new Color(1f, 0.64f, 0.32f, 0.95f));
+
+            CreateHudBar(
+                gaugesPanel.transform,
+                "HeatBar",
+                new Vector2(24f, -214f),
+                new Vector2(382f, 10f),
+                new Color(0.08f, 0.12f, 0.18f, 0.95f),
+                new Color(1f, 0.38f, 0.08f, 1f),
+                out _hudHeatFillImage,
+                out _hudHeatBarRect,
+                out _hudHeatMarkerRect);
+
+            _hudStyleValueText = CreateHudText(
+                gaugesPanel.transform,
+                "StyleValue",
+                "STYLE 0%",
+                14f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Left,
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(24f, -226f),
+                new Vector2(170f, 22f),
+                new Color(0.52f, 1f, 0.72f, 0.95f));
+
+            CreateHudBar(
+                gaugesPanel.transform,
+                "StyleBar",
+                new Vector2(24f, -248f),
+                new Vector2(382f, 10f),
+                new Color(0.08f, 0.12f, 0.18f, 0.95f),
+                new Color(0.14f, 1f, 0.48f, 1f),
+                out _hudStyleFillImage,
+                out _hudStyleBarRect,
+                out _hudStyleMarkerRect);
 
             _gameplayHudScoreboardRoot = CreateHudPanel(
                 _gameplayHudRoot.transform,
@@ -1639,20 +1877,38 @@ namespace RetrowaveRocket
             _hudInfoRoleText = null;
             _hudInfoHintText = null;
             _hudInfoCollapsedText = null;
+            _hudStyleNotificationRoot = null;
+            _hudStyleNotificationText = null;
             _hudGaugeTitleText = null;
             _hudSpeedValueText = null;
             _hudSpeedLabelText = null;
             _hudBoostValueText = null;
+            _hudHeatValueText = null;
+            _hudStyleValueText = null;
             _hudGaugeStatusText = null;
             _hudRarePowerUpRoot = null;
             _hudRarePowerUpIconImage = null;
             _hudRarePowerUpText = null;
+            _hudObjectivePointerRoot = null;
+            _hudObjectivePointerArrowRect = null;
+            _hudObjectivePointerArrowText = null;
+            _hudObjectivePointerText = null;
+            _hudRareBeaconPointerRoot = null;
+            _hudRareBeaconPointerArrowRect = null;
+            _hudRareBeaconPointerArrowText = null;
+            _hudRareBeaconPointerText = null;
             _hudSpeedFillImage = null;
             _hudBoostFillImage = null;
+            _hudHeatFillImage = null;
+            _hudStyleFillImage = null;
             _hudSpeedBarRect = null;
             _hudBoostBarRect = null;
+            _hudHeatBarRect = null;
+            _hudStyleBarRect = null;
             _hudSpeedMarkerRect = null;
             _hudBoostMarkerRect = null;
+            _hudHeatMarkerRect = null;
+            _hudStyleMarkerRect = null;
             _hudScoreboardTitleText = null;
             _hudScoreboardSummaryText = null;
             _hudScoreboardBlueText = null;
@@ -1663,6 +1919,8 @@ namespace RetrowaveRocket
             _hudGoalDetailText = null;
             _hudCountdownLabelText = null;
             _hudCountdownValueText = null;
+            _observedStyleAwardSerial = 0;
+            _styleNotificationHideAtRealtime = 0f;
         }
 
         private void RefreshGameplayHudState()
@@ -1681,6 +1939,8 @@ namespace RetrowaveRocket
             if (!isVisible)
             {
                 ResetHudInfoIntroState();
+                HideStyleNotification(resetObservedSerial: true);
+                HideTargetPointers();
                 return;
             }
 
@@ -1827,6 +2087,14 @@ namespace RetrowaveRocket
                     {
                         roleLine += "\nChoose blue, pink, or spectator to enter the lobby.";
                     }
+                    else if (localPlayer != null && localPlayer.IsArenaParticipant && !localPlayer.HasSelectedUtilityRole)
+                    {
+                        roleLine += "\nChoose a utility role to finish entering the arena.";
+                    }
+                    else if (localPlayer != null && localPlayer.IsArenaParticipant)
+                    {
+                        roleLine += $"\nUtility: {RetrowaveUtilityRoleCatalog.GetLabel(localPlayer.UtilityRole)}";
+                    }
                     else if (entry.QueuedForNextRound)
                     {
                         roleLine += "\nYour team switch is queued for the next round.";
@@ -1857,12 +2125,21 @@ namespace RetrowaveRocket
                     hint += "\nWarmup spectator cam: [ / ] cycles player follow.";
                 }
 
+                if (matchManager != null
+                    && matchManager.TryGetComponent<RetrowaveArenaObjectiveSystem>(out var objectives)
+                    && objectives.ActiveObjectiveType != RetrowaveArenaObjectiveType.None)
+                {
+                    hint += $"\nHold objective: {RetrowaveArenaObjectiveCatalog.GetLabel(objectives.ActiveObjectiveType)} {Mathf.RoundToInt(objectives.CaptureProgressNormalized * 100f)}%";
+                }
+
                 _hudInfoHintText.text = hint;
             }
 
             if (_hudGaugeTitleText != null)
             {
-                _hudGaugeTitleText.text = localPlayer != null ? $"{localPlayer.Team.ToString().ToUpperInvariant()} DRIVER" : "SPECTATOR CAM";
+                _hudGaugeTitleText.text = localPlayer != null
+                    ? $"{localPlayer.Team.ToString().ToUpperInvariant()} {RetrowaveUtilityRoleCatalog.GetLabel(localPlayer.UtilityRole).ToUpperInvariant()}"
+                    : "SPECTATOR CAM";
             }
 
             if (localPlayer != null)
@@ -1889,7 +2166,15 @@ namespace RetrowaveRocket
                     var heldType = hasRarePowerUp ? rareInventory.HeldType : RetrowaveRarePowerUpType.None;
                     _hudGaugeStatusText.text = hasRarePowerUp
                         ? $"Armed: {GetRarePowerUpLabel(heldType)}"
-                        : localPlayer.HasSpeedBoost
+                        : localPlayer.IsStunned
+                            ? "STUNNED"
+                            : localPlayer.IsSlowed
+                            ? "SLOWED"
+                            : localPlayer.IsOvercharged
+                            ? "OVERDRIVE"
+                            : localPlayer.IsOverheated
+                            ? "Overheated"
+                            : localPlayer.HasSpeedBoost
                             ? "Speed burst"
                             : (localPlayer.IsGroundedForHud ? "Grounded" : "Airborne");
 
@@ -1906,8 +2191,40 @@ namespace RetrowaveRocket
                     _hudBoostFillImage.fillAmount = localPlayer.BoostNormalized;
                 }
 
+                if (_hudHeatValueText != null)
+                {
+                    _hudHeatValueText.text = localPlayer.IsOverheated
+                        ? "HEAT OVER"
+                        : $"HEAT {Mathf.RoundToInt(localPlayer.HeatNormalized * 100f)}%";
+                }
+
+                if (_hudStyleValueText != null)
+                {
+                    _hudStyleValueText.text = $"STYLE {Mathf.RoundToInt(localPlayer.StyleNormalized * 100f)}%";
+                }
+
+                if (_hudHeatFillImage != null)
+                {
+                    _hudHeatFillImage.fillAmount = localPlayer.HeatNormalized;
+                    _hudHeatFillImage.color = localPlayer.IsOvercharged
+                        ? Color.Lerp(new Color(1f, 0.86f, 0.24f, 1f), Color.white, Mathf.PingPong(Time.time * 3.5f, 0.18f))
+                        : localPlayer.IsOverheated
+                        ? Color.Lerp(new Color(1f, 0.08f, 0.04f, 1f), Color.white, Mathf.PingPong(Time.time * 4f, 0.25f))
+                        : Color.Lerp(new Color(1f, 0.5f, 0.08f, 1f), new Color(1f, 0.1f, 0.04f, 1f), localPlayer.HeatNormalized);
+                }
+
+                if (_hudStyleFillImage != null)
+                {
+                    _hudStyleFillImage.fillAmount = localPlayer.StyleNormalized;
+                    _hudStyleFillImage.color = Color.Lerp(new Color(0.14f, 1f, 0.48f, 1f), new Color(0.94f, 1f, 0.2f, 1f), localPlayer.StyleNormalized);
+                }
+
                 UpdateHudBarMarker(_hudSpeedBarRect, _hudSpeedMarkerRect, localPlayer.SpeedNormalized);
                 UpdateHudBarMarker(_hudBoostBarRect, _hudBoostMarkerRect, localPlayer.BoostNormalized);
+                UpdateHudBarMarker(_hudHeatBarRect, _hudHeatMarkerRect, localPlayer.HeatNormalized);
+                UpdateHudBarMarker(_hudStyleBarRect, _hudStyleMarkerRect, localPlayer.StyleNormalized);
+                RefreshStyleNotification(localPlayer);
+                RefreshTargetPointers(localPlayer, matchManager);
             }
             else
             {
@@ -1924,6 +2241,16 @@ namespace RetrowaveRocket
                 if (_hudBoostValueText != null)
                 {
                     _hudBoostValueText.text = "--";
+                }
+
+                if (_hudHeatValueText != null)
+                {
+                    _hudHeatValueText.text = "HEAT --";
+                }
+
+                if (_hudStyleValueText != null)
+                {
+                    _hudStyleValueText.text = "STYLE --";
                 }
 
                 if (_hudGaugeStatusText != null)
@@ -1943,8 +2270,22 @@ namespace RetrowaveRocket
                     _hudBoostFillImage.fillAmount = 0f;
                 }
 
+                if (_hudHeatFillImage != null)
+                {
+                    _hudHeatFillImage.fillAmount = 0f;
+                }
+
+                if (_hudStyleFillImage != null)
+                {
+                    _hudStyleFillImage.fillAmount = 0f;
+                }
+
                 UpdateHudBarMarker(_hudSpeedBarRect, _hudSpeedMarkerRect, 0f);
                 UpdateHudBarMarker(_hudBoostBarRect, _hudBoostMarkerRect, 0f);
+                UpdateHudBarMarker(_hudHeatBarRect, _hudHeatMarkerRect, 0f);
+                UpdateHudBarMarker(_hudStyleBarRect, _hudStyleMarkerRect, 0f);
+                HideStyleNotification(resetObservedSerial: true);
+                HideTargetPointers();
             }
 
             if (_gameplayHudScoreboardRoot != null)
@@ -2476,6 +2817,19 @@ namespace RetrowaveRocket
         {
             if (TryRequestRoleSelection(role))
             {
+                _showPauseMenu = role != RetrowaveLobbyRole.Spectator;
+
+                if (role == RetrowaveLobbyRole.Spectator)
+                {
+                    SetGameplayMenuVisible(false);
+                }
+            }
+        }
+
+        private void SelectUtilityRole(RetrowaveUtilityRole role)
+        {
+            if (TryRequestUtilityRoleSelection(role))
+            {
                 _showPauseMenu = false;
                 SetGameplayMenuVisible(false);
             }
@@ -2523,6 +2877,10 @@ namespace RetrowaveRocket
                 SetMenuButtonLayout(_gameplayBlueButton, new Vector2(0f, 72f), new Vector2(380f, 52f));
                 SetMenuButtonLayout(_gameplayPinkButton, new Vector2(0f, 0f), new Vector2(380f, 52f));
                 SetMenuButtonLayout(_gameplaySpectateButton, new Vector2(0f, -72f), new Vector2(380f, 52f));
+                SetMenuButtonLayout(_gameplayStrikerButton, new Vector2(-196f, 38f), new Vector2(186f, 52f));
+                SetMenuButtonLayout(_gameplayDefenderButton, new Vector2(196f, 38f), new Vector2(186f, 52f));
+                SetMenuButtonLayout(_gameplayRunnerButton, new Vector2(-196f, -38f), new Vector2(186f, 52f));
+                SetMenuButtonLayout(_gameplayDisruptorButton, new Vector2(196f, -38f), new Vector2(186f, 52f));
                 SetMenuButtonLayout(_gameplayStartButton, new Vector2(0f, -148f), new Vector2(380f, 52f));
                 SetMenuButtonLayout(_gameplayResumeButton, new Vector2(0f, -286f), new Vector2(380f, 52f));
                 SetMenuButtonLayout(_gameplayReturnButton, new Vector2(0f, -286f), new Vector2(380f, 52f));
@@ -2538,6 +2896,10 @@ namespace RetrowaveRocket
             SetMenuButtonLayout(_gameplayBlueButton, new Vector2(0f, 48f), new Vector2(320f, 52f));
             SetMenuButtonLayout(_gameplayPinkButton, new Vector2(0f, -20f), new Vector2(320f, 52f));
             SetMenuButtonLayout(_gameplaySpectateButton, new Vector2(0f, -88f), new Vector2(320f, 52f));
+            SetMenuButtonLayout(_gameplayStrikerButton, new Vector2(-170f, 34f), new Vector2(154f, 52f));
+            SetMenuButtonLayout(_gameplayDefenderButton, new Vector2(170f, 34f), new Vector2(154f, 52f));
+            SetMenuButtonLayout(_gameplayRunnerButton, new Vector2(-170f, -42f), new Vector2(154f, 52f));
+            SetMenuButtonLayout(_gameplayDisruptorButton, new Vector2(170f, -42f), new Vector2(154f, 52f));
             SetMenuButtonLayout(_gameplayStartButton, new Vector2(0f, -164f), new Vector2(320f, 52f));
             SetMenuButtonLayout(_gameplayResumeButton, new Vector2(-132f, -242f), new Vector2(320f, 52f));
             SetMenuButtonLayout(_gameplayReturnButton, new Vector2(132f, -242f), new Vector2(320f, 52f));
@@ -3264,13 +3626,19 @@ namespace RetrowaveRocket
         private void DrawPauseMenu()
         {
             var forceSelection = RequiresRoleSelection();
+            var choosingUtility = IsChoosingUtilityRole();
             var matchManager = GetActiveMatchManager();
-            var title = forceSelection ? "Choose Your Role" : "Match Menu";
+            var title = choosingUtility ? "Choose Utility Role" : (forceSelection ? "Choose Your Role" : "Match Menu");
 
             GUILayout.BeginArea(new Rect(Screen.width * 0.5f - 210f, 70f, 420f, 340f), GUI.skin.window);
             GUILayout.Label(title);
 
-            if (forceSelection)
+            if (choosingUtility)
+            {
+                GUILayout.Label("Pick a lightweight vehicle identity for this team.");
+                GUILayout.Label("Shortcuts: 1 = Striker, 2 = Defender, 3 = Runner, 4 = Disruptor");
+            }
+            else if (forceSelection)
             {
                 GUILayout.Label("Pick blue, pink, or spectator before jumping fully into the lobby.");
                 GUILayout.Label("Shortcuts: 1 or B = Blue, 2 or P = Pink, 3 or S = Spectator");
@@ -3282,11 +3650,21 @@ namespace RetrowaveRocket
 
             GUILayout.Space(10f);
 
-            DrawRoleButton("Join Blue Team", RetrowaveLobbyRole.Blue);
-            DrawRoleButton("Join Pink Team", RetrowaveLobbyRole.Pink);
-            DrawRoleButton("Spectate", RetrowaveLobbyRole.Spectator);
+            if (choosingUtility)
+            {
+                DrawUtilityRoleButton("Striker", RetrowaveUtilityRole.Striker);
+                DrawUtilityRoleButton("Defender", RetrowaveUtilityRole.Defender);
+                DrawUtilityRoleButton("Runner", RetrowaveUtilityRole.Runner);
+                DrawUtilityRoleButton("Disruptor", RetrowaveUtilityRole.Disruptor);
+            }
+            else
+            {
+                DrawRoleButton("Join Blue Team", RetrowaveLobbyRole.Blue);
+                DrawRoleButton("Join Pink Team", RetrowaveLobbyRole.Pink);
+                DrawRoleButton("Spectate", RetrowaveLobbyRole.Spectator);
+            }
 
-            if (matchManager != null && TryGetLocalLobbyEntry(out var entry) && entry.IsHost)
+            if (!forceSelection && matchManager != null && TryGetLocalLobbyEntry(out var entry) && entry.IsHost)
             {
                 GUILayout.Space(14f);
                 var startLabel = matchManager.IsWarmup ? "Start Match" : "Restart Match";
@@ -3329,6 +3707,19 @@ namespace RetrowaveRocket
             }
 
             if (TryRequestRoleSelection(role))
+            {
+                _showPauseMenu = role != RetrowaveLobbyRole.Spectator;
+            }
+        }
+
+        private void DrawUtilityRoleButton(string label, RetrowaveUtilityRole role)
+        {
+            if (!GUILayout.Button(label, GUILayout.Height(32f)))
+            {
+                return;
+            }
+
+            if (TryRequestUtilityRoleSelection(role))
             {
                 _showPauseMenu = false;
             }
@@ -3526,18 +3917,47 @@ namespace RetrowaveRocket
 
         private bool RequiresRoleSelection()
         {
-            if (HasConfirmedRoleSelection())
+            if (!HasConfirmedRoleSelection())
             {
-                ClearPendingRoleSelectionRequest();
+                if (HasPendingRoleSelectionRequest())
+                {
+                    return false;
+                }
+
+                return RetrowavePlayerController.LocalPlayer != null || TryGetLocalLobbyEntry(out _);
+            }
+
+            if (RequiresUtilityRoleSelection())
+            {
+                return true;
+            }
+
+            ClearPendingRoleSelectionRequest();
+            return false;
+        }
+
+        private bool RequiresUtilityRoleSelection()
+        {
+            var localPlayer = RetrowavePlayerController.LocalPlayer;
+
+            if (localPlayer == null)
+            {
                 return false;
             }
 
-            if (HasPendingRoleSelectionRequest())
-            {
-                return false;
-            }
+            return localPlayer.HasSelectedRole
+                   && localPlayer.IsArenaParticipant
+                   && !localPlayer.HasSelectedUtilityRole;
+        }
 
-            return RetrowavePlayerController.LocalPlayer != null || TryGetLocalLobbyEntry(out _);
+        private bool IsChoosingUtilityRole()
+        {
+            return HasConfirmedRoleSelection() && RequiresUtilityRoleSelection();
+        }
+
+        private bool IsChoosingTeamRole()
+        {
+            return !HasConfirmedRoleSelection() && !HasPendingRoleSelectionRequest();
         }
 
         private bool HasConfirmedRoleSelection()
@@ -3630,9 +4050,247 @@ namespace RetrowaveRocket
 
             if (_hudRarePowerUpText != null)
             {
-                _hudRarePowerUpText.text = $"ARMED {RetrowavePlayerController.GetRarePowerUpIconLabel(type)}";
+                _hudRarePowerUpText.text = $"ARMED {GetRarePowerUpLabel(type).ToUpperInvariant()}";
                 _hudRarePowerUpText.color = Color.Lerp(color, Color.white, 0.18f);
             }
+        }
+
+        private void RefreshStyleNotification(RetrowavePlayerController localPlayer)
+        {
+            if (_hudStyleNotificationRoot == null || _hudStyleNotificationText == null || localPlayer == null)
+            {
+                return;
+            }
+
+            var serial = localPlayer.LastStyleAwardSerial;
+
+            if (serial != 0 && serial != _observedStyleAwardSerial)
+            {
+                _observedStyleAwardSerial = serial;
+                var points = Mathf.Max(1, Mathf.RoundToInt(localPlayer.LastStyleAwardPoints));
+                var styleEvent = localPlayer.LastStyleAwardEvent;
+                var color = GetStyleEventColor(styleEvent);
+                _hudStyleNotificationText.text = $"+{points} STYLE  {RetrowaveStyleEventCatalog.GetLabel(styleEvent).ToUpperInvariant()}";
+                _hudStyleNotificationText.color = Color.Lerp(color, Color.white, 0.18f);
+                _hudStyleNotificationRoot.SetActive(true);
+                _styleNotificationHideAtRealtime = Time.unscaledTime + 1.8f;
+            }
+
+            if (_hudStyleNotificationRoot.activeSelf && Time.unscaledTime >= _styleNotificationHideAtRealtime)
+            {
+                _hudStyleNotificationRoot.SetActive(false);
+            }
+        }
+
+        private void HideStyleNotification(bool resetObservedSerial)
+        {
+            if (_hudStyleNotificationRoot != null)
+            {
+                _hudStyleNotificationRoot.SetActive(false);
+            }
+
+            _styleNotificationHideAtRealtime = 0f;
+
+            if (resetObservedSerial)
+            {
+                _observedStyleAwardSerial = 0;
+            }
+        }
+
+        private void RefreshTargetPointers(RetrowavePlayerController localPlayer, RetrowaveMatchManager matchManager)
+        {
+            if (localPlayer == null)
+            {
+                HideTargetPointers();
+                return;
+            }
+
+            RefreshObjectivePointer(localPlayer, matchManager);
+            RefreshRareBeaconPointer(localPlayer);
+        }
+
+        private void RefreshObjectivePointer(RetrowavePlayerController localPlayer, RetrowaveMatchManager matchManager)
+        {
+            if (_hudObjectivePointerRoot == null || _hudObjectivePointerText == null)
+            {
+                return;
+            }
+
+            if (matchManager == null
+                || !matchManager.TryGetComponent<RetrowaveArenaObjectiveSystem>(out var objectives)
+                || objectives.ActiveObjectiveType == RetrowaveArenaObjectiveType.None)
+            {
+                _hudObjectivePointerRoot.SetActive(false);
+                return;
+            }
+
+            var distance = Vector3.Distance(localPlayer.transform.position, objectives.ObjectivePosition);
+            var objectiveColor = RetrowaveArenaObjectiveCatalog.GetColor(objectives.ActiveObjectiveType);
+            var teamPrefix = objectives.CapturingTeamValue switch
+            {
+                (int)RetrowaveTeam.Blue => "Blue",
+                (int)RetrowaveTeam.Pink => "Pink",
+                _ => "--",
+            };
+            var text = $"OBJ {teamPrefix}  {Mathf.RoundToInt(distance)}m\n{RetrowaveArenaObjectiveCatalog.GetLabel(objectives.ActiveObjectiveType).ToUpperInvariant()} {Mathf.RoundToInt(objectives.CaptureProgressNormalized * 100f)}%";
+            UpdateTargetPointer(
+                _hudObjectivePointerRoot,
+                _hudObjectivePointerArrowRect,
+                _hudObjectivePointerArrowText,
+                _hudObjectivePointerText,
+                localPlayer.transform.position,
+                objectives.ObjectivePosition,
+                text,
+                objectiveColor);
+        }
+
+        private void RefreshRareBeaconPointer(RetrowavePlayerController localPlayer)
+        {
+            if (_hudRareBeaconPointerRoot == null || _hudRareBeaconPointerText == null)
+            {
+                return;
+            }
+
+            var beacon = FindNearestRareBeacon(localPlayer.transform.position);
+
+            if (beacon == null)
+            {
+                _hudRareBeaconPointerRoot.SetActive(false);
+                return;
+            }
+
+            var beaconPosition = beacon.transform.position;
+            var distance = Vector3.Distance(localPlayer.transform.position, beaconPosition);
+            var color = RetrowavePlayerController.GetRarePowerUpColor(beacon.HeldType);
+            var progressText = beacon.RequiresCapture ? $"{Mathf.RoundToInt(beacon.CaptureProgress * 100f)}%" : "READY";
+            var text = $"RARE {Mathf.RoundToInt(distance)}m\n{GetRarePowerUpLabel(beacon.HeldType).ToUpperInvariant()} {progressText}";
+            UpdateTargetPointer(
+                _hudRareBeaconPointerRoot,
+                _hudRareBeaconPointerArrowRect,
+                _hudRareBeaconPointerArrowText,
+                _hudRareBeaconPointerText,
+                localPlayer.transform.position,
+                beaconPosition,
+                text,
+                color);
+        }
+
+        private static RarePowerUpPickupBeacon FindNearestRareBeacon(Vector3 fromPosition)
+        {
+            RarePowerUpPickupBeacon nearest = null;
+            var nearestDistance = float.MaxValue;
+            var activeBeacons = RarePowerUpPickupBeacon.Active;
+
+            for (var i = 0; i < activeBeacons.Count; i++)
+            {
+                var beacon = activeBeacons[i];
+
+                if (beacon == null || !beacon.IsActive)
+                {
+                    continue;
+                }
+
+                var distance = (beacon.transform.position - fromPosition).sqrMagnitude;
+
+                if (distance >= nearestDistance)
+                {
+                    continue;
+                }
+
+                nearest = beacon;
+                nearestDistance = distance;
+            }
+
+            return nearest;
+        }
+
+        private static void UpdateTargetPointer(
+            GameObject root,
+            RectTransform arrowRect,
+            TMP_Text arrowText,
+            TMP_Text labelText,
+            Vector3 fromPosition,
+            Vector3 targetPosition,
+            string label,
+            Color color)
+        {
+            if (root == null || labelText == null)
+            {
+                return;
+            }
+
+            root.SetActive(true);
+            labelText.text = label;
+            labelText.color = Color.Lerp(color, Color.white, 0.2f);
+
+            if (arrowText != null)
+            {
+                arrowText.color = color;
+            }
+
+            if (arrowRect == null)
+            {
+                return;
+            }
+
+            var camera = Camera.main;
+            var direction = targetPosition - fromPosition;
+            direction.y = 0f;
+
+            if (direction.sqrMagnitude < 0.001f)
+            {
+                arrowRect.localRotation = Quaternion.identity;
+                return;
+            }
+
+            direction.Normalize();
+            var forward = camera != null ? camera.transform.forward : Vector3.forward;
+            var right = camera != null ? camera.transform.right : Vector3.right;
+            forward.y = 0f;
+            right.y = 0f;
+
+            if (forward.sqrMagnitude < 0.001f)
+            {
+                forward = Vector3.forward;
+            }
+
+            if (right.sqrMagnitude < 0.001f)
+            {
+                right = Vector3.right;
+            }
+
+            forward.Normalize();
+            right.Normalize();
+            var angle = Mathf.Atan2(Vector3.Dot(direction, right), Vector3.Dot(direction, forward)) * Mathf.Rad2Deg;
+            arrowRect.localRotation = Quaternion.Euler(0f, 0f, -angle);
+        }
+
+        private void HideTargetPointers()
+        {
+            if (_hudObjectivePointerRoot != null)
+            {
+                _hudObjectivePointerRoot.SetActive(false);
+            }
+
+            if (_hudRareBeaconPointerRoot != null)
+            {
+                _hudRareBeaconPointerRoot.SetActive(false);
+            }
+        }
+
+        private static Color GetStyleEventColor(RetrowaveStyleEvent styleEvent)
+        {
+            return styleEvent switch
+            {
+                RetrowaveStyleEvent.TeamCombo => new Color(0.16f, 1f, 0.78f, 1f),
+                RetrowaveStyleEvent.Pass => new Color(0.48f, 0.86f, 1f, 1f),
+                RetrowaveStyleEvent.ObjectiveCapture => new Color(1f, 0.72f, 0.16f, 1f),
+                RetrowaveStyleEvent.CleanLanding => new Color(0.46f, 1f, 0.52f, 1f),
+                RetrowaveStyleEvent.FlipTrick => new Color(1f, 0.42f, 0.9f, 1f),
+                RetrowaveStyleEvent.AerialManeuver => new Color(0.5f, 0.72f, 1f, 1f),
+                RetrowaveStyleEvent.AerialTouch => new Color(0.42f, 0.94f, 1f, 1f),
+                _ => new Color(0.72f, 1f, 0.78f, 1f),
+            };
         }
 
         private static string GetRoleLabel(RetrowaveLobbyEntry entry)
@@ -3716,6 +4374,18 @@ namespace RetrowaveRocket
             }
 
             return false;
+        }
+
+        private bool TryRequestUtilityRoleSelection(RetrowaveUtilityRole role)
+        {
+            if (RetrowavePlayerController.LocalPlayer == null)
+            {
+                return false;
+            }
+
+            RetrowavePlayerController.LocalPlayer.RequestUtilityRoleSelection(role);
+            ClearPendingRoleSelectionRequest();
+            return true;
         }
 
         private void ShutdownSession()
@@ -4043,6 +4713,8 @@ namespace RetrowaveRocket
             prefab.AddComponent<NetworkTransform>();
             prefab.AddComponent<NetworkRigidbody>();
             prefab.AddComponent<VehicleStatusEffects>();
+            prefab.AddComponent<VehicleOverdriveSystem>();
+            prefab.AddComponent<VehicleStyleMeter>();
             prefab.AddComponent<RetrowavePlayerController>();
             prefab.AddComponent<RetrowaveVehicleEngineAudio>();
             prefab.AddComponent<RarePowerUpInventory>();
@@ -4087,6 +4759,7 @@ namespace RetrowaveRocket
             prefab.AddComponent<NetworkObject>();
             prefab.AddComponent<NetworkTransform>();
             prefab.AddComponent<NetworkRigidbody>();
+            prefab.AddComponent<RetrowaveBallStateController>();
             prefab.AddComponent<RetrowaveBall>();
             prefab.GetComponent<MeshRenderer>().sharedMaterial = CreateBallSurfaceMaterial();
             FinalizeRuntimePrefab(prefab, 0xA1000002u, isTemplate);
@@ -4258,6 +4931,7 @@ namespace RetrowaveRocket
             prefab.AddComponent<NetworkObject>();
             prefab.AddComponent<RetrowaveMatchManager>();
             prefab.AddComponent<RarePowerUpSpawner>();
+            prefab.AddComponent<RetrowaveArenaObjectiveSystem>();
             FinalizeRuntimePrefab(prefab, 0xA1000004u, isTemplate);
             return prefab;
         }

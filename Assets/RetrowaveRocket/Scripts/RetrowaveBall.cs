@@ -27,6 +27,7 @@ namespace RetrowaveRocket
         private Rigidbody _rigidbody;
         private MeshRenderer _renderer;
         private Light _glow;
+        private RetrowaveBallStateController _stateController;
 
         public static RetrowaveBall Instance { get; private set; }
         public Rigidbody Body => _rigidbody;
@@ -35,6 +36,7 @@ namespace RetrowaveRocket
         {
             _rigidbody = GetComponent<Rigidbody>();
             _renderer = GetComponent<MeshRenderer>();
+            _stateController = GetComponent<RetrowaveBallStateController>();
 
             var glowObject = new GameObject("Ball Glow");
             glowObject.transform.SetParent(transform, false);
@@ -52,7 +54,8 @@ namespace RetrowaveRocket
                 return;
             }
 
-            _glow.intensity = 4f + _rigidbody.linearVelocity.magnitude * 0.35f;
+            var stateBoost = _stateController != null && _stateController.State != RetrowaveBallState.Normal ? 3.2f : 0f;
+            _glow.intensity = 4f + stateBoost + _rigidbody.linearVelocity.magnitude * 0.35f;
         }
 
         private void FixedUpdate()
@@ -86,8 +89,10 @@ namespace RetrowaveRocket
 
             if (player != null)
             {
-                RetrowaveMatchManager.Instance?.RegisterBallTouch(player);
-                ApplyPlayerHit(player, collision);
+                var touchResult = RetrowaveMatchManager.Instance != null
+                    ? RetrowaveMatchManager.Instance.RegisterBallTouch(player)
+                    : new RetrowaveBallTouchResult(true, false, ulong.MaxValue, 1f);
+                ApplyPlayerHit(player, collision, touchResult);
             }
         }
 
@@ -122,13 +127,14 @@ namespace RetrowaveRocket
 
             _rigidbody.linearVelocity = Vector3.zero;
             _rigidbody.angularVelocity = Vector3.zero;
+            _stateController?.ResetStateServer();
             transform.SetPositionAndRotation(RetrowaveArenaConfig.BallSpawnPoint, Quaternion.identity);
             _rigidbody.position = RetrowaveArenaConfig.BallSpawnPoint;
             _rigidbody.rotation = Quaternion.identity;
             Physics.SyncTransforms();
         }
 
-        private void ApplyPlayerHit(RetrowavePlayerController player, Collision collision)
+        private void ApplyPlayerHit(RetrowavePlayerController player, Collision collision, RetrowaveBallTouchResult touchResult)
         {
             if (player.Body == null)
             {
@@ -188,6 +194,25 @@ namespace RetrowaveRocket
             var touchStrength = Mathf.Clamp01(impactStrength * 0.7f + approachStrength * 0.3f);
             var desiredVelocityChange = Mathf.Lerp(MinimumTouchSpeed, rawVelocityChange, touchStrength);
             desiredVelocityChange = Mathf.Clamp(desiredVelocityChange, MinimumTouchSpeed, MaxHitVelocityChange);
+            desiredVelocityChange *= touchResult.HitMultiplier;
+            desiredVelocityChange *= player.GetBallHitPowerMultiplier(transform.position);
+
+            if (!player.IsGroundedForHud)
+            {
+                player.AwardStyleServer(RetrowaveStyleEvent.AerialTouch);
+            }
+            else
+            {
+                player.AwardStyleServer(RetrowaveStyleEvent.ControlledTouch);
+            }
+
+            _stateController?.ModifyHitServer(
+                player,
+                touchResult.IsTeamCombo,
+                ref launchDirection,
+                ref desiredVelocityChange,
+                touchStrength);
+            desiredVelocityChange = Mathf.Clamp(desiredVelocityChange, MinimumTouchSpeed, MaxHitVelocityChange * 1.45f);
 
             _rigidbody.AddForce(launchDirection * desiredVelocityChange, ForceMode.VelocityChange);
             PreservePlayerMomentum(player, playerForward, contactNormal, desiredVelocityChange, frontFactor, centerFactor);

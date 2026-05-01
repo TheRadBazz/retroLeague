@@ -112,7 +112,7 @@ namespace RetrowaveRocket
                 sourceId,
                 size,
                 _segmentLifetime,
-                _stunDuration,
+                _stunDuration * owner.StatusEffectDurationMultiplier,
                 _stunImmunitySeconds,
                 _spinTorque,
                 _affectEnemiesOnly,

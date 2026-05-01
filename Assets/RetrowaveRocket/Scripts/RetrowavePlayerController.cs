@@ -59,7 +59,7 @@ namespace RetrowaveRocket
         private const float ProbeRayLength = 1.4f;
         private const float MinDriveableGroundNormalY = 0.52f;
         private const float MinSuspensionAlignment = 0.18f;
-        private const float RideHeight = 0.68f;
+        private const float RideHeight = 0.58f;
         private const float SuspensionSpring = 104f;
         private const float SuspensionDamping = 14.5f;
         private const float GroundDriveAcceleration = 58f;
@@ -101,6 +101,11 @@ namespace RetrowaveRocket
         private const float MaxBoostSpeed = 38f;
         private const float GroundedGraceSeconds = 0.14f;
         private const float BoostStartThreshold = 0.6f;
+        private const float CleanLandingMinAirTime = 0.65f;
+        private const float CleanLandingMinAlignment = 0.72f;
+        private const float AerialTrickMinAirTime = 0.42f;
+        private const float AerialTrickCooldownSeconds = 1.35f;
+        private const float FlipTrickSpinThreshold = 5.8f;
 
         private readonly NetworkVariable<int> _teamValue = new(
             (int)RetrowaveTeam.Blue,
@@ -142,6 +147,16 @@ namespace RetrowaveRocket
             NetworkVariableReadPermission.Everyone,
             NetworkVariableWritePermission.Server);
 
+        private readonly NetworkVariable<int> _utilityRoleValue = new(
+            (int)RetrowaveUtilityRole.Striker,
+            NetworkVariableReadPermission.Everyone,
+            NetworkVariableWritePermission.Server);
+
+        private readonly NetworkVariable<bool> _hasSelectedUtilityRole = new(
+            false,
+            NetworkVariableReadPermission.Everyone,
+            NetworkVariableWritePermission.Server);
+
         private readonly NetworkVariable<bool> _podiumPresentationHidden = new(
             false,
             NetworkVariableReadPermission.Everyone,
@@ -153,11 +168,15 @@ namespace RetrowaveRocket
         private Light _boostLight;
         private VehicleStatusEffects _statusEffects;
         private RarePowerUpInventory _rarePowerUpInventory;
+        private VehicleOverdriveSystem _overdrive;
+        private VehicleStyleMeter _styleMeter;
         private Canvas _nameTagCanvas;
         private TextMeshProUGUI _nameTagText;
+        private GameObject _nameTagRoleIconRoot;
+        private Image _nameTagRoleIconImage;
+        private TextMeshProUGUI _nameTagStatusText;
         private GameObject _nameTagPowerUpIconRoot;
         private Image _nameTagPowerUpIconImage;
-        private TextMeshProUGUI _nameTagPowerUpIconText;
         private string _appliedDisplayName = string.Empty;
         private Material _appliedBodyMaterial;
         private RetrowavePlayerInputState _latestInput;
@@ -178,6 +197,13 @@ namespace RetrowaveRocket
         private Vector3 _groundNormal = Vector3.up;
         private float _coyoteTimer;
         private int _groundProbeCount;
+        private bool _styleWasGrounded = true;
+        private float _styleAirborneTime;
+        private float _styleAirborneSpin;
+        private float _stylePeakHeight;
+        private float _styleMinVerticalVelocity;
+        private float _lastAerialManeuverStyleAt;
+        private float _lastFlipStyleAt;
 
         public static RetrowavePlayerController LocalOwner { get; private set; }
         public static RetrowavePlayerController LocalPlayer { get; private set; }
@@ -197,6 +223,18 @@ namespace RetrowaveRocket
         public ulong ControllingClientId => OwnerClientId;
         public float EngineAudioThrottle => IsOwner ? _cachedThrottle : _engineAudioThrottle.Value;
         public bool EngineAudioBoosting => _engineAudioBoosting.Value;
+        public RetrowaveUtilityRole UtilityRole => (RetrowaveUtilityRole)_utilityRoleValue.Value;
+        public bool HasSelectedUtilityRole => _hasSelectedUtilityRole.Value;
+        public float HeatNormalized => _overdrive != null ? _overdrive.HeatNormalized : 0f;
+        public bool IsOverheated => _overdrive != null && _overdrive.IsOverheated;
+        public bool IsOvercharged => _overdrive != null && _overdrive.IsOvercharged;
+        public bool IsStunned => _statusEffects != null && _statusEffects.IsStunned;
+        public bool IsSlowed => _statusEffects != null && (_statusEffects.MovementMultiplier < 0.98f || _statusEffects.SteeringMultiplier < 0.98f);
+        public float StyleNormalized => _styleMeter != null ? _styleMeter.StyleNormalized : 0f;
+        public float ObjectiveCaptureMultiplier => _styleMeter != null ? _styleMeter.CaptureSpeedMultiplier : 1f;
+        public int LastStyleAwardSerial => _styleMeter != null ? _styleMeter.LastAwardSerial : 0;
+        public float LastStyleAwardPoints => _styleMeter != null ? _styleMeter.LastAwardPoints : 0f;
+        public RetrowaveStyleEvent LastStyleAwardEvent => _styleMeter != null ? _styleMeter.LastAwardEvent : RetrowaveStyleEvent.ControlledTouch;
 
         private void Awake()
         {
@@ -206,6 +244,8 @@ namespace RetrowaveRocket
             _boostLight = GetComponentInChildren<Light>(true);
             _statusEffects = GetComponent<VehicleStatusEffects>();
             _rarePowerUpInventory = GetComponent<RarePowerUpInventory>();
+            _overdrive = GetComponent<VehicleOverdriveSystem>();
+            _styleMeter = GetComponent<VehicleStyleMeter>();
             EnsureNameTag();
 
             if (_boostLight == null)
@@ -310,6 +350,7 @@ namespace RetrowaveRocket
             _teamValue.OnValueChanged += HandleTeamChanged;
             _lobbyRoleValue.OnValueChanged += HandleLobbyRoleChanged;
             _hasSelectedRole.OnValueChanged += HandleSelectedRoleChanged;
+            _utilityRoleValue.OnValueChanged += HandleUtilityRoleChanged;
             _podiumPresentationHidden.OnValueChanged += HandlePodiumPresentationChanged;
 
             if (!IsServer)
@@ -338,6 +379,7 @@ namespace RetrowaveRocket
             _teamValue.OnValueChanged -= HandleTeamChanged;
             _lobbyRoleValue.OnValueChanged -= HandleLobbyRoleChanged;
             _hasSelectedRole.OnValueChanged -= HandleSelectedRoleChanged;
+            _utilityRoleValue.OnValueChanged -= HandleUtilityRoleChanged;
             _podiumPresentationHidden.OnValueChanged -= HandlePodiumPresentationChanged;
 
             if (LocalOwner == this)
@@ -368,6 +410,16 @@ namespace RetrowaveRocket
         }
 
         [ServerRpc]
+        private void SubmitUtilityRoleSelectionServerRpc(int roleValue)
+        {
+            var clampedRole = (RetrowaveUtilityRole)Mathf.Clamp(
+                roleValue,
+                (int)RetrowaveUtilityRole.Striker,
+                (int)RetrowaveUtilityRole.Disruptor);
+            SetUtilityRoleServer(clampedRole, true);
+        }
+
+        [ServerRpc]
         private void SubmitDisplayNameServerRpc(string displayName)
         {
             RetrowaveMatchManager.Instance?.HandlePlayerDisplayName(OwnerClientId, displayName);
@@ -385,8 +437,11 @@ namespace RetrowaveRocket
                 return;
             }
 
+            var wasArenaParticipant = _hasSelectedRole.Value && _lobbyRoleValue.Value != (int)RetrowaveLobbyRole.Spectator;
+            var previousTeam = (RetrowaveTeam)_teamValue.Value;
             _lobbyRoleValue.Value = team == RetrowaveTeam.Blue ? (int)RetrowaveLobbyRole.Blue : (int)RetrowaveLobbyRole.Pink;
             _hasSelectedRole.Value = true;
+            _hasSelectedUtilityRole.Value = wasArenaParticipant && previousTeam == team && _hasSelectedUtilityRole.Value;
             _teamValue.Value = (int)team;
             _spawnPosition = RetrowaveArenaConfig.ClampToPlayableSpawn(spawnPosition, team);
             _spawnRotation = RetrowaveArenaConfig.GetSpawnRotation(team);
@@ -421,8 +476,11 @@ namespace RetrowaveRocket
             _boostRequiresRelease = false;
             _glideRequiresRelease = false;
             _boostRechargeDelayTimer = 0f;
+            ResetAerialStyleTracking();
             SetEngineAudioStateServer(0f, false);
             _statusEffects?.ClearServer();
+            _overdrive?.ClearServer();
+            _styleMeter?.ClearServer();
         }
 
         public void SetPodiumPresentationServer(Vector3 position, Quaternion rotation, bool isVisible)
@@ -445,8 +503,11 @@ namespace RetrowaveRocket
             _boostRequiresRelease = false;
             _glideRequiresRelease = false;
             _boostRechargeDelayTimer = 0f;
+            ResetAerialStyleTracking();
             SetEngineAudioStateServer(0f, false);
             _statusEffects?.ClearServer();
+            _overdrive?.ClearServer();
+            _styleMeter?.ClearServer();
         }
 
         public void SetSpectatorStateServer(bool hasSelectedRole)
@@ -458,6 +519,7 @@ namespace RetrowaveRocket
 
             _lobbyRoleValue.Value = (int)RetrowaveLobbyRole.Spectator;
             _hasSelectedRole.Value = hasSelectedRole;
+            _hasSelectedUtilityRole.Value = false;
             _podiumPresentationHidden.Value = false;
             _rigidbody.linearVelocity = Vector3.zero;
             _rigidbody.angularVelocity = Vector3.zero;
@@ -475,8 +537,11 @@ namespace RetrowaveRocket
             _boostRequiresRelease = false;
             _glideRequiresRelease = false;
             _boostRechargeDelayTimer = 0f;
+            ResetAerialStyleTracking();
             SetEngineAudioStateServer(0f, false);
             _statusEffects?.ClearServer();
+            _overdrive?.ClearServer();
+            _styleMeter?.ClearServer();
         }
 
         public void RequestRoleSelection(RetrowaveLobbyRole role)
@@ -487,6 +552,27 @@ namespace RetrowaveRocket
             }
 
             SubmitRoleSelectionServerRpc((int)role);
+        }
+
+        public void RequestUtilityRoleSelection(RetrowaveUtilityRole role)
+        {
+            if (!IsOwner || !IsSpawned)
+            {
+                return;
+            }
+
+            SubmitUtilityRoleSelectionServerRpc((int)role);
+        }
+
+        public void SetUtilityRoleServer(RetrowaveUtilityRole role, bool selected)
+        {
+            if (!IsServer)
+            {
+                return;
+            }
+
+            _utilityRoleValue.Value = (int)role;
+            _hasSelectedUtilityRole.Value = selected;
         }
 
         public void ApplyPowerUp(RetrowavePowerUpType type)
@@ -520,8 +606,11 @@ namespace RetrowaveRocket
             _boostFx.Value = false;
             _boostRequiresRelease = false;
             _glideRequiresRelease = false;
+            ResetAerialStyleTracking();
             SetEngineAudioStateServer(0f, false);
             _statusEffects?.ClearServer();
+            _overdrive?.ClearServer();
+            _styleMeter?.ClearServer();
             _rarePowerUpInventory ??= GetComponent<RarePowerUpInventory>();
             _rarePowerUpInventory?.ClearServer();
         }
@@ -642,8 +731,9 @@ namespace RetrowaveRocket
             }
             else
             {
+                var rechargeMultiplier = _overdrive != null ? _overdrive.RechargeMultiplier : 1f;
                 _boostAmount.Value = Mathf.Clamp(
-                    _boostAmount.Value + RetrowaveArenaConfig.PassiveBoostRegen * Time.fixedDeltaTime,
+                    _boostAmount.Value + RetrowaveArenaConfig.PassiveBoostRegen * rechargeMultiplier * Time.fixedDeltaTime,
                     0f,
                     RetrowaveArenaConfig.MaxBoost);
             }
@@ -665,9 +755,31 @@ namespace RetrowaveRocket
                 speedMultiplier = _statusEffects.ModifyMaxSpeedMultiplier(speedMultiplier);
             }
 
+            speedMultiplier *= RetrowaveUtilityRoleCatalog.GetMaxSpeedMultiplier(UtilityRole);
+
+            if (_overdrive != null)
+            {
+                speedMultiplier *= _overdrive.MaxSpeedMultiplier;
+            }
+
+            if (_styleMeter != null)
+            {
+                speedMultiplier *= Mathf.Lerp(1f, 1.018f, _styleMeter.StyleNormalized);
+            }
+
+            if (treatedAsGrounded && _groundNormal.y < 0.78f)
+            {
+                AwardStyleServer(RetrowaveStyleEvent.WallRide, Time.fixedDeltaTime);
+            }
+
+            UpdateAerialStyleTracking(controlInput, treatedAsGrounded);
+
+            var gripMultiplier = RetrowaveUtilityRoleCatalog.GetGroundGripMultiplier(UtilityRole)
+                                 * (_overdrive != null ? _overdrive.GroundGripMultiplier : 1f);
+
             if (treatedAsGrounded)
             {
-                SimulateGrounded(controlInput, speedMultiplier);
+                SimulateGrounded(controlInput, speedMultiplier, gripMultiplier);
             }
             else
             {
@@ -682,12 +794,22 @@ namespace RetrowaveRocket
                 _boostRequiresRelease = true;
             }
 
-            var isBoosting = controlInput.Boost && !_boostRequiresRelease && _boostAmount.Value > BoostStartThreshold;
+            var canBoost = _overdrive == null || _overdrive.CanBoost;
+
+            if (controlInput.Boost && !canBoost)
+            {
+                _boostRequiresRelease = true;
+            }
+
+            var isBoosting = controlInput.Boost && !_boostRequiresRelease && canBoost && _boostAmount.Value > BoostStartThreshold;
 
             if (isBoosting)
             {
                 ApplyBoost(treatedAsGrounded);
-                SpendBoost(BoostDrainRate * Time.fixedDeltaTime);
+                var drainMultiplier = RetrowaveUtilityRoleCatalog.GetBoostDrainMultiplier(UtilityRole)
+                                      * (_overdrive != null ? _overdrive.BoostDrainMultiplier : 1f)
+                                      * (_styleMeter != null ? _styleMeter.BoostEfficiencyMultiplier : 1f);
+                SpendBoost(BoostDrainRate * drainMultiplier * Time.fixedDeltaTime);
 
                 if (_boostAmount.Value <= BoostStartThreshold)
                 {
@@ -697,6 +819,7 @@ namespace RetrowaveRocket
                 }
             }
 
+            _overdrive?.TickServer(isBoosting, isGliding, treatedAsGrounded);
             _boostFx.Value = isBoosting || isGliding;
             SetEngineAudioStateServer(controlInput.Throttle, isBoosting);
 
@@ -772,7 +895,104 @@ namespace RetrowaveRocket
             return false;
         }
 
-        private void SimulateGrounded(RetrowavePlayerInputState input, float speedMultiplier)
+        private void UpdateAerialStyleTracking(RetrowavePlayerInputState input, bool treatedAsGrounded)
+        {
+            if (treatedAsGrounded)
+            {
+                if (!_styleWasGrounded)
+                {
+                    EvaluateLandingStyleServer();
+                }
+
+                ResetAerialStyleTracking();
+                return;
+            }
+
+            if (_styleWasGrounded)
+            {
+                _styleAirborneTime = 0f;
+                _styleAirborneSpin = 0f;
+                _stylePeakHeight = transform.position.y;
+                _styleMinVerticalVelocity = 0f;
+            }
+
+            _styleWasGrounded = false;
+            _styleAirborneTime += Time.fixedDeltaTime;
+            _stylePeakHeight = Mathf.Max(_stylePeakHeight, transform.position.y);
+            _styleMinVerticalVelocity = Mathf.Min(_styleMinVerticalVelocity, _rigidbody.linearVelocity.y);
+
+            var localAngularVelocity = transform.InverseTransformDirection(_rigidbody.angularVelocity);
+            var pitchSpin = Mathf.Abs(localAngularVelocity.x);
+            var yawSpin = Mathf.Abs(localAngularVelocity.y);
+            var rollSpin = Mathf.Abs(localAngularVelocity.z);
+            var trickRate = pitchSpin + rollSpin + yawSpin * 0.55f;
+            _styleAirborneSpin += trickRate * Time.fixedDeltaTime;
+
+            if (_styleAirborneTime < AerialTrickMinAirTime)
+            {
+                return;
+            }
+
+            var airControl = Mathf.Abs(input.Throttle) + Mathf.Abs(input.Steer) + Mathf.Abs(input.Roll);
+
+            if (airControl > 0.85f
+                && trickRate > 5.2f
+                && _rigidbody.linearVelocity.magnitude > 7f
+                && Time.time >= _lastAerialManeuverStyleAt + AerialTrickCooldownSeconds)
+            {
+                var multiplier = Mathf.Clamp(trickRate / 8f, 0.65f, 1.4f);
+                AwardStyleServer(RetrowaveStyleEvent.AerialManeuver, multiplier);
+                _lastAerialManeuverStyleAt = Time.time;
+            }
+
+            var flipSpin = Mathf.Max(pitchSpin, rollSpin);
+
+            if (_styleAirborneSpin >= FlipTrickSpinThreshold
+                && flipSpin > 5.6f
+                && Time.time >= _lastFlipStyleAt + AerialTrickCooldownSeconds)
+            {
+                var multiplier = Mathf.Clamp(_styleAirborneSpin / 8f, 0.75f, 1.55f);
+                AwardStyleServer(RetrowaveStyleEvent.FlipTrick, multiplier);
+                _styleAirborneSpin = Mathf.Max(0f, _styleAirborneSpin - FlipTrickSpinThreshold);
+                _lastFlipStyleAt = Time.time;
+            }
+        }
+
+        private void EvaluateLandingStyleServer()
+        {
+            if (_styleAirborneTime < CleanLandingMinAirTime)
+            {
+                return;
+            }
+
+            var alignment = Vector3.Dot(transform.up, _groundNormal);
+            var angularSpeed = _rigidbody.angularVelocity.magnitude;
+            var planarSpeed = Vector3.ProjectOnPlane(_rigidbody.linearVelocity, _groundNormal).magnitude;
+
+            if (alignment < CleanLandingMinAlignment || angularSpeed > 8.4f || planarSpeed < 3.5f)
+            {
+                return;
+            }
+
+            var heightDrop = Mathf.Max(0f, _stylePeakHeight - transform.position.y);
+            var fallBonus = Mathf.InverseLerp(1f, 9f, heightDrop);
+            var fallSpeedBonus = Mathf.InverseLerp(3f, 12f, -_styleMinVerticalVelocity);
+            var spinBonus = Mathf.InverseLerp(3f, 13f, _styleAirborneSpin);
+            var airTimeBonus = Mathf.InverseLerp(0.65f, 2.4f, _styleAirborneTime);
+            var multiplier = Mathf.Clamp(0.72f + fallBonus * 0.28f + fallSpeedBonus * 0.22f + spinBonus * 0.28f + airTimeBonus * 0.28f, 0.72f, 1.65f);
+            AwardStyleServer(RetrowaveStyleEvent.CleanLanding, multiplier);
+        }
+
+        private void ResetAerialStyleTracking()
+        {
+            _styleWasGrounded = true;
+            _styleAirborneTime = 0f;
+            _styleAirborneSpin = 0f;
+            _stylePeakHeight = transform.position.y;
+            _styleMinVerticalVelocity = 0f;
+        }
+
+        private void SimulateGrounded(RetrowavePlayerInputState input, float speedMultiplier, float gripMultiplier)
         {
             var surfaceForward = Vector3.ProjectOnPlane(transform.forward, _groundNormal);
             var surfaceRight = Vector3.ProjectOnPlane(transform.right, _groundNormal);
@@ -804,9 +1024,14 @@ namespace RetrowaveRocket
 
             _rigidbody.AddForce(surfaceForward * forwardDelta, ForceMode.VelocityChange);
             _rigidbody.AddForce(surfaceRight * lateralCorrection, ForceMode.VelocityChange);
-            _rigidbody.AddForce(-surfaceRight * lateralSpeed * GroundGrip, ForceMode.Acceleration);
-            _rigidbody.AddForce(-planarVelocity * GroundDrag, ForceMode.Acceleration);
+            _rigidbody.AddForce(-surfaceRight * lateralSpeed * GroundGrip * gripMultiplier, ForceMode.Acceleration);
+            _rigidbody.AddForce(-planarVelocity * GroundDrag * Mathf.Lerp(1f, gripMultiplier, 0.45f), ForceMode.Acceleration);
             _rigidbody.AddForce(-_groundNormal * GroundStickForce, ForceMode.Acceleration);
+
+            if (Mathf.Abs(input.Steer) > 0.45f && Mathf.Abs(lateralSpeed) > 3.8f && Mathf.Abs(forwardSpeed) > 8f)
+            {
+                AwardStyleServer(RetrowaveStyleEvent.Drift, Time.fixedDeltaTime);
+            }
 
             if (Mathf.Abs(input.Steer) > 0.02f)
             {
@@ -875,6 +1100,7 @@ namespace RetrowaveRocket
             }
 
             SpendBoost(JumpBoostCost);
+            _overdrive?.RegisterJumpServer();
 
             if (treatedAsGrounded)
             {
@@ -954,7 +1180,9 @@ namespace RetrowaveRocket
                 forceDirection = transform.forward;
             }
 
-            _rigidbody.AddForce(forceDirection * BoostForce, ForceMode.Acceleration);
+            var forceMultiplier = (_overdrive != null ? _overdrive.BoostForceMultiplier : 1f)
+                                  * RetrowaveUtilityRoleCatalog.GetMaxSpeedMultiplier(UtilityRole);
+            _rigidbody.AddForce(forceDirection * (BoostForce * forceMultiplier), ForceMode.Acceleration);
         }
 
         private void SpendBoost(float amount)
@@ -978,6 +1206,53 @@ namespace RetrowaveRocket
         {
             _boostAmount.Value = 0f;
             _boostRechargeDelayTimer = BoostRechargeDelaySeconds;
+        }
+
+        public float GetBallHitPowerMultiplier(Vector3 ballPosition)
+        {
+            var multiplier = RetrowaveUtilityRoleCatalog.GetBallHitMultiplier(UtilityRole);
+
+            if (UtilityRole == RetrowaveUtilityRole.Defender)
+            {
+                var defendingOwnHalf = Team == RetrowaveTeam.Blue ? ballPosition.z < 0f : ballPosition.z > 0f;
+                multiplier *= defendingOwnHalf ? 1.08f : 0.98f;
+            }
+
+            if (_overdrive != null)
+            {
+                multiplier *= Mathf.Lerp(1f, 1.055f, _overdrive.HeatNormalized);
+            }
+
+            if (_styleMeter != null)
+            {
+                multiplier *= Mathf.Lerp(1f, 1.045f, _styleMeter.StyleNormalized);
+            }
+
+            return multiplier;
+        }
+
+        public float StatusEffectDurationMultiplier => RetrowaveUtilityRoleCatalog.GetStatusDurationMultiplier(UtilityRole);
+
+        public void AwardStyleServer(RetrowaveStyleEvent styleEvent, float multiplier = 1f)
+        {
+            if (!IsServer)
+            {
+                return;
+            }
+
+            _styleMeter ??= GetComponent<VehicleStyleMeter>();
+            _styleMeter?.AwardServer(styleEvent, multiplier * RetrowaveUtilityRoleCatalog.GetStyleGainMultiplier(UtilityRole));
+        }
+
+        public void ApplyObjectiveOverchargeServer(float durationSeconds, float coolingAmount)
+        {
+            if (!IsServer)
+            {
+                return;
+            }
+
+            _overdrive ??= GetComponent<VehicleOverdriveSystem>();
+            _overdrive?.ApplyOverchargeServer(durationSeconds, coolingAmount);
         }
 
         private void SetEngineAudioStateServer(float throttle, bool isBoosting)
@@ -1005,6 +1280,11 @@ namespace RetrowaveRocket
         private void HandleSelectedRoleChanged(bool _, bool __)
         {
             RefreshPresentationState();
+        }
+
+        private void HandleUtilityRoleChanged(int _, int __)
+        {
+            RefreshNameTagRoleIcon();
         }
 
         private void HandlePodiumPresentationChanged(bool _, bool __)
@@ -1104,6 +1384,8 @@ namespace RetrowaveRocket
             {
                 _nameTagText.color = Color.Lerp(RetrowaveStyle.GetTeamGlow(team), Color.white, 0.2f);
             }
+
+            RefreshNameTagRoleIcon();
         }
 
         private void UpdateBoostVisuals()
@@ -1113,9 +1395,23 @@ namespace RetrowaveRocket
                 return;
             }
 
-            var targetIntensity = _boostFx.Value ? 11f : 0f;
+            var heat = HeatNormalized;
+            var teamGlow = RetrowaveStyle.GetTeamGlow(Team);
+            var heatColor = IsStunned
+                ? Color.Lerp(new Color(1f, 0.08f, 0.16f, 1f), Color.white, Mathf.PingPong(Time.time * 6f, 0.3f))
+                : IsSlowed
+                    ? new Color(0.34f, 0.78f, 1f, 1f)
+                    : IsOvercharged
+                        ? new Color(1f, 0.86f, 0.24f, 1f)
+                        : IsOverheated
+                ? Color.Lerp(new Color(1f, 0.12f, 0.05f, 1f), Color.white, Mathf.PingPong(Time.time * 5f, 0.28f))
+                : Color.Lerp(teamGlow, new Color(1f, 0.42f, 0.08f, 1f), heat);
+            _boostLight.color = heatColor;
+
+            var targetIntensity = _boostFx.Value ? 11f : Mathf.Lerp(0f, 3.2f, heat);
+            targetIntensity = Mathf.Max(targetIntensity, IsStunned ? 7.5f : IsSlowed ? 4.8f : IsOvercharged ? 6.5f : 0f);
             _boostLight.intensity = Mathf.Lerp(_boostLight.intensity, targetIntensity, Time.deltaTime * 11f);
-            _boostLight.range = _boostFx.Value ? 11f : 5f;
+            _boostLight.range = _boostFx.Value ? 11f : Mathf.Lerp(5f, IsOvercharged ? 10.5f : 7.5f, heat);
         }
 
         private void LateUpdate()
@@ -1154,7 +1450,7 @@ namespace RetrowaveRocket
             canvasScaler.dynamicPixelsPerUnit = 18f;
 
             var canvasRect = canvasObject.GetComponent<RectTransform>();
-            canvasRect.sizeDelta = new Vector2(268f, 48f);
+            canvasRect.sizeDelta = new Vector2(284f, 72f);
             canvasRect.localScale = Vector3.one * 0.01f;
 
             var textObject = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
@@ -1163,7 +1459,7 @@ namespace RetrowaveRocket
             var textRect = textObject.GetComponent<RectTransform>();
             textRect.anchorMin = Vector2.zero;
             textRect.anchorMax = Vector2.one;
-            textRect.offsetMin = Vector2.zero;
+            textRect.offsetMin = new Vector2(42f, 18f);
             textRect.offsetMax = new Vector2(-42f, 0f);
 
             _nameTagText = textObject.GetComponent<TextMeshProUGUI>();
@@ -1174,6 +1470,37 @@ namespace RetrowaveRocket
             _nameTagText.textWrappingMode = TextWrappingModes.NoWrap;
             _nameTagText.text = string.Empty;
 
+            _nameTagRoleIconRoot = new GameObject("Utility Role Icon", typeof(RectTransform), typeof(Image));
+            _nameTagRoleIconRoot.transform.SetParent(canvasObject.transform, false);
+
+            var roleIconRect = _nameTagRoleIconRoot.GetComponent<RectTransform>();
+            roleIconRect.anchorMin = new Vector2(0f, 0.5f);
+            roleIconRect.anchorMax = new Vector2(0f, 0.5f);
+            roleIconRect.pivot = new Vector2(0f, 0.5f);
+            roleIconRect.anchoredPosition = new Vector2(4f, 9f);
+            roleIconRect.sizeDelta = new Vector2(24f, 24f);
+
+            _nameTagRoleIconImage = _nameTagRoleIconRoot.GetComponent<Image>();
+
+            var statusTextObject = new GameObject("Status Label", typeof(RectTransform), typeof(TextMeshProUGUI));
+            statusTextObject.transform.SetParent(canvasObject.transform, false);
+
+            var statusTextRect = statusTextObject.GetComponent<RectTransform>();
+            statusTextRect.anchorMin = new Vector2(0.5f, 0f);
+            statusTextRect.anchorMax = new Vector2(0.5f, 0f);
+            statusTextRect.pivot = new Vector2(0.5f, 0f);
+            statusTextRect.anchoredPosition = new Vector2(0f, 2f);
+            statusTextRect.sizeDelta = new Vector2(240f, 22f);
+
+            _nameTagStatusText = statusTextObject.GetComponent<TextMeshProUGUI>();
+            _nameTagStatusText.font = TMP_Settings.defaultFontAsset;
+            _nameTagStatusText.fontSize = 16f;
+            _nameTagStatusText.fontStyle = FontStyles.Bold;
+            _nameTagStatusText.alignment = TextAlignmentOptions.Center;
+            _nameTagStatusText.textWrappingMode = TextWrappingModes.NoWrap;
+            _nameTagStatusText.color = Color.white;
+            _nameTagStatusText.gameObject.SetActive(false);
+
             _nameTagPowerUpIconRoot = new GameObject("PowerUp Icon", typeof(RectTransform), typeof(Image));
             _nameTagPowerUpIconRoot.transform.SetParent(canvasObject.transform, false);
 
@@ -1182,29 +1509,13 @@ namespace RetrowaveRocket
             iconRect.anchorMax = new Vector2(1f, 0.5f);
             iconRect.pivot = new Vector2(1f, 0.5f);
             iconRect.anchoredPosition = new Vector2(-4f, 0f);
-            iconRect.sizeDelta = new Vector2(34f, 34f);
+            iconRect.sizeDelta = new Vector2(24f, 24f);
 
             _nameTagPowerUpIconImage = _nameTagPowerUpIconRoot.GetComponent<Image>();
             _nameTagPowerUpIconImage.color = new Color(0.1f, 1f, 0.32f, 0.9f);
 
-            var iconTextObject = new GameObject("Icon Label", typeof(RectTransform), typeof(TextMeshProUGUI));
-            iconTextObject.transform.SetParent(_nameTagPowerUpIconRoot.transform, false);
-
-            var iconTextRect = iconTextObject.GetComponent<RectTransform>();
-            iconTextRect.anchorMin = Vector2.zero;
-            iconTextRect.anchorMax = Vector2.one;
-            iconTextRect.offsetMin = Vector2.zero;
-            iconTextRect.offsetMax = Vector2.zero;
-
-            _nameTagPowerUpIconText = iconTextObject.GetComponent<TextMeshProUGUI>();
-            _nameTagPowerUpIconText.font = TMP_Settings.defaultFontAsset;
-            _nameTagPowerUpIconText.fontSize = 23f;
-            _nameTagPowerUpIconText.fontStyle = FontStyles.Bold;
-            _nameTagPowerUpIconText.alignment = TextAlignmentOptions.Center;
-            _nameTagPowerUpIconText.textWrappingMode = TextWrappingModes.NoWrap;
-            _nameTagPowerUpIconText.text = string.Empty;
-            _nameTagPowerUpIconText.color = Color.white;
             _nameTagPowerUpIconRoot.SetActive(false);
+            RefreshNameTagRoleIcon();
         }
 
         private void RefreshNameTag()
@@ -1226,7 +1537,9 @@ namespace RetrowaveRocket
                 }
             }
 
+            RefreshNameTagRoleIcon();
             RefreshNameTagPowerUpIcon();
+            RefreshNameTagStatus();
 
             var camera = Camera.main;
 
@@ -1263,11 +1576,91 @@ namespace RetrowaveRocket
             {
                 _nameTagPowerUpIconImage.color = GetRarePowerUpColor(heldType);
             }
+        }
 
-            if (_nameTagPowerUpIconText != null)
+        private void RefreshNameTagRoleIcon()
+        {
+            if (_nameTagRoleIconRoot == null)
             {
-                _nameTagPowerUpIconText.text = GetRarePowerUpIconLabel(heldType);
+                return;
             }
+
+            var shouldShow = IsArenaParticipant && HasSelectedUtilityRole;
+            _nameTagRoleIconRoot.SetActive(shouldShow);
+
+            if (!shouldShow)
+            {
+                return;
+            }
+
+            var roleColor = RetrowaveUtilityRoleCatalog.GetColor(UtilityRole);
+            var teamColor = RetrowaveStyle.GetTeamGlow(Team);
+            var blendedColor = Color.Lerp(roleColor, teamColor, 0.28f);
+
+            if (_nameTagRoleIconImage != null)
+            {
+                _nameTagRoleIconImage.color = blendedColor;
+            }
+        }
+
+        private void RefreshNameTagStatus()
+        {
+            if (_nameTagStatusText == null)
+            {
+                return;
+            }
+
+            if (TryResolveStatusLabel(out var label, out var color))
+            {
+                _nameTagStatusText.gameObject.SetActive(true);
+                _nameTagStatusText.text = label;
+                _nameTagStatusText.color = Color.Lerp(color, Color.white, 0.18f);
+                return;
+            }
+
+            _nameTagStatusText.gameObject.SetActive(false);
+        }
+
+        private bool TryResolveStatusLabel(out string label, out Color color)
+        {
+            if (IsStunned)
+            {
+                label = "STUNNED";
+                color = new Color(1f, 0.08f, 0.18f, 1f);
+                return true;
+            }
+
+            if (IsSlowed)
+            {
+                label = "SLOWED";
+                color = new Color(0.34f, 0.78f, 1f, 1f);
+                return true;
+            }
+
+            if (IsOvercharged)
+            {
+                label = "OVERDRIVE";
+                color = new Color(1f, 0.86f, 0.24f, 1f);
+                return true;
+            }
+
+            if (IsOverheated)
+            {
+                label = "OVERHEAT";
+                color = new Color(1f, 0.22f, 0.06f, 1f);
+                return true;
+            }
+
+            if (HeatNormalized > 0.72f)
+            {
+                label = "HOT";
+                color = new Color(1f, 0.48f, 0.08f, 1f);
+                return true;
+            }
+
+            label = string.Empty;
+            color = Color.white;
+            return false;
         }
 
         public static Color GetRarePowerUpColor(RetrowaveRarePowerUpType type)
@@ -1278,17 +1671,6 @@ namespace RetrowaveRocket
                 RetrowaveRarePowerUpType.GravityBomb => new Color(1f, 0.38f, 0.1f, 0.92f),
                 RetrowaveRarePowerUpType.ChronoDome => new Color(0.32f, 0.72f, 1f, 0.92f),
                 _ => new Color(0.72f, 0.92f, 1f, 0.92f),
-            };
-        }
-
-        public static string GetRarePowerUpIconLabel(RetrowaveRarePowerUpType type)
-        {
-            return type switch
-            {
-                RetrowaveRarePowerUpType.NeonSnareTrail => "N",
-                RetrowaveRarePowerUpType.GravityBomb => "G",
-                RetrowaveRarePowerUpType.ChronoDome => "C",
-                _ => string.Empty,
             };
         }
 

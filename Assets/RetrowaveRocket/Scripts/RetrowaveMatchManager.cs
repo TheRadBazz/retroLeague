@@ -358,11 +358,11 @@ namespace RetrowaveRocket
             StartGoalCelebration(defendedGoal, scoringTeam, scorerName);
         }
 
-        public void RegisterBallTouch(RetrowavePlayerController player)
+        public RetrowaveBallTouchResult RegisterBallTouch(RetrowavePlayerController player)
         {
             if (!IsServer || player == null)
             {
-                return;
+                return RetrowaveBallTouchResult.Ignored;
             }
 
             var now = Time.timeAsDouble;
@@ -370,9 +370,14 @@ namespace RetrowaveRocket
 
             if (_lastTouchClientId == clientId && now - _lastTouchTime < 0.15d)
             {
-                return;
+                return RetrowaveBallTouchResult.Ignored;
             }
 
+            var isTeamCombo = _lastTouchClientId != ulong.MaxValue
+                              && _lastTouchClientId != clientId
+                              && _lastTouchTeam == player.Team
+                              && now - _lastTouchTime <= 2d;
+            var previousClientId = _lastTouchClientId;
             _previousTouchClientId = _lastTouchClientId;
             _previousTouchTeam = _lastTouchTeam;
             _previousTouchTime = _lastTouchTime;
@@ -380,6 +385,14 @@ namespace RetrowaveRocket
             _lastTouchClientId = clientId;
             _lastTouchTeam = player.Team;
             _lastTouchTime = now;
+
+            if (isTeamCombo)
+            {
+                player.AwardStyleServer(RetrowaveStyleEvent.TeamCombo);
+                AwardStyleToPlayerServer(previousClientId, RetrowaveStyleEvent.Pass);
+            }
+
+            return new RetrowaveBallTouchResult(true, isTeamCombo, previousClientId, isTeamCombo ? 1.16f : 1f);
         }
 
         public void RequestRoleSelection(RetrowaveLobbyRole role)
@@ -710,6 +723,11 @@ namespace RetrowaveRocket
             if (TryGetComponent<RarePowerUpSpawner>(out var rareSpawner))
             {
                 rareSpawner.ResetForMatchStartServer();
+            }
+
+            if (TryGetComponent<RetrowaveArenaObjectiveSystem>(out var arenaObjectives))
+            {
+                arenaObjectives.ResetForMatchStartServer();
             }
         }
 
@@ -1228,6 +1246,23 @@ namespace RetrowaveRocket
             var entry = _lobbyEntries[index];
             entry.Assists++;
             _lobbyEntries[index] = entry;
+        }
+
+        private void AwardStyleToPlayerServer(ulong clientId, RetrowaveStyleEvent styleEvent)
+        {
+            if (clientId == ulong.MaxValue || NetworkManager.Singleton == null)
+            {
+                return;
+            }
+
+            if (!NetworkManager.Singleton.ConnectedClients.TryGetValue(clientId, out var client)
+                || client.PlayerObject == null
+                || !client.PlayerObject.TryGetComponent<RetrowavePlayerController>(out var player))
+            {
+                return;
+            }
+
+            player.AwardStyleServer(styleEvent);
         }
 
         private void ClearTouchHistory()

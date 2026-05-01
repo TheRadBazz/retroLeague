@@ -37,7 +37,6 @@ namespace RetrowaveRocket
         [SerializeField] private AudioClip _engineStopClip;
         [SerializeField] private AudioClip _idleClip;
         [SerializeField] private AudioClip _maxRpmClip;
-        [SerializeField] private AudioClip _aggressivenessOnClip;
         [SerializeField] private AudioClip _aggressivenessOffClip;
         [SerializeField] private AudioClip _idleLowOnClip;
         [SerializeField] private AudioClip _lowOnClip;
@@ -65,11 +64,9 @@ namespace RetrowaveRocket
         private AudioClip[] _offClips;
         private float _rpm;
         private float _load;
-        private float _fxCooldown;
         private float _startupLoopsMutedUntil;
         private bool _wasActive;
         private bool _hasEverBeenActive;
-        private bool _wasBoosting;
 
         private void Awake()
         {
@@ -103,7 +100,6 @@ namespace RetrowaveRocket
             }
 
             _wasActive = isActive;
-            _fxCooldown = Mathf.Max(0f, _fxCooldown - Time.deltaTime);
 
             if (!isActive)
             {
@@ -113,7 +109,6 @@ namespace RetrowaveRocket
 
             UpdateEngineState();
             UpdateLoopSources();
-            UpdateAggressivenessFx();
         }
 
         private void LoadDefaultClips()
@@ -122,7 +117,6 @@ namespace RetrowaveRocket
             LoadClip(ref _engineStopClip, "engine_stop");
             LoadClip(ref _idleClip, "idle");
             LoadClip(ref _maxRpmClip, "maxRPM");
-            LoadClip(ref _aggressivenessOnClip, "aggressiveness_on_fx");
             LoadClip(ref _aggressivenessOffClip, "aggressiveness_off_fx");
             LoadClip(ref _idleLowOnClip, "idle_low_on");
             LoadClip(ref _lowOnClip, "low_on");
@@ -332,25 +326,6 @@ namespace RetrowaveRocket
             source.pitch = Mathf.Clamp(pitch, 0.72f, 1.32f);
         }
 
-        private void UpdateAggressivenessFx()
-        {
-            var isBoosting = _player.EngineAudioBoosting;
-
-            if (_fxCooldown > 0f)
-            {
-                _wasBoosting = isBoosting;
-                return;
-            }
-
-            if (isBoosting && !_wasBoosting)
-            {
-                PlayOneShot(_aggressivenessOnClip, 0.42f);
-                _fxCooldown = 0.65f;
-            }
-
-            _wasBoosting = isBoosting;
-        }
-
         private void PlayOneShot(AudioClip clip, float volumeScale)
         {
             if (_oneShotSource == null || clip == null)
@@ -370,7 +345,6 @@ namespace RetrowaveRocket
             FadeSources(_offSources);
             _rpm = Mathf.MoveTowards(_rpm, 0f, _rpmFallSpeed * Time.deltaTime);
             _load = Mathf.MoveTowards(_load, 0f, _loadFallSpeed * Time.deltaTime);
-            _wasBoosting = false;
         }
 
         private float GetStartupLoopMuteDuration()
