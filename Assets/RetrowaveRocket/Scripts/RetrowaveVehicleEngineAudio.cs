@@ -22,8 +22,12 @@ namespace RetrowaveRocket
             0.94f,
         };
 
-        [SerializeField] private float _localVolume = 0.58f;
-        [SerializeField] private float _remoteVolume = 0.48f;
+        [SerializeField] private float _localVolume = 0.42f;
+        [SerializeField] private float _remoteVolume = 0.28f;
+        [SerializeField] private float _engineMasterVolume = 0.42f;
+        [SerializeField] private float _idleLoopVolume = 0.9f;
+        [SerializeField] private float _rpmLoopVolume = 0.18f;
+        [SerializeField] private float _maxRpmVolume = 0.14f;
         [SerializeField] private float _rpmRiseSpeed = 7.5f;
         [SerializeField] private float _rpmFallSpeed = 3.4f;
         [SerializeField] private float _loadRiseSpeed = 10f;
@@ -282,7 +286,7 @@ namespace RetrowaveRocket
             }
 
             var sfxVolume = RetrowaveGameSettings.SfxVolume;
-            var volumeBase = sfxVolume * (_player.IsOwner ? _localVolume : _remoteVolume);
+            var volumeBase = sfxVolume * Mathf.Clamp01(_engineMasterVolume) * (_player.IsOwner ? _localVolume : _remoteVolume);
             var throttleActive = Mathf.Abs(_player.EngineAudioThrottle) > 0.05f || _player.EngineAudioBoosting;
             var movingWithoutThrottle = !throttleActive && _player.CurrentSpeed > _coastOffLoopSpeedThreshold;
             var onBlend = Mathf.SmoothStep(0f, 1f, _load);
@@ -290,17 +294,17 @@ namespace RetrowaveRocket
             var idleWeight = Mathf.Clamp01(1f - _rpm * 1.85f);
             var basePitch = Mathf.Lerp(0.92f, 1.08f, _rpm);
 
-            SetSource(_idleSource, volumeBase * Mathf.Lerp(0.42f, 0.07f, onBlend) * Mathf.Max(0.18f, idleWeight), Mathf.Lerp(0.92f, 1.03f, _rpm));
+            SetSource(_idleSource, volumeBase * _idleLoopVolume * Mathf.Lerp(0.42f, 0.07f, onBlend) * Mathf.Max(0.18f, idleWeight), Mathf.Lerp(0.92f, 1.03f, _rpm));
 
             for (var i = 0; i < BandCenters.Length; i++)
             {
                 var bandWeight = GetBandWeight(_rpm, i);
-                SetSource(_onSources[i], volumeBase * bandWeight * onBlend, basePitch);
-                SetSource(_offSources[i], volumeBase * bandWeight * offBlend * Mathf.Lerp(0.82f, 0.38f, idleWeight), basePitch * 0.98f);
+                SetSource(_onSources[i], volumeBase * _rpmLoopVolume * bandWeight * onBlend, basePitch);
+                SetSource(_offSources[i], volumeBase * _rpmLoopVolume * bandWeight * offBlend * Mathf.Lerp(0.82f, 0.38f, idleWeight), basePitch * 0.98f);
             }
 
             var maxWeight = Mathf.InverseLerp(0.88f, 1f, _rpm) * Mathf.Lerp(0.25f, 1f, onBlend);
-            SetSource(_maxRpmSource, volumeBase * maxWeight, Mathf.Lerp(0.95f, 1.08f, maxWeight));
+            SetSource(_maxRpmSource, volumeBase * _maxRpmVolume * maxWeight, Mathf.Lerp(0.95f, 1.08f, maxWeight));
         }
 
         private static float GetBandWeight(float rpm, int index)
@@ -333,7 +337,7 @@ namespace RetrowaveRocket
                 return;
             }
 
-            _oneShotSource.volume = RetrowaveGameSettings.SfxVolume * (_player != null && _player.IsOwner ? _localVolume : _remoteVolume);
+            _oneShotSource.volume = RetrowaveGameSettings.SfxVolume * Mathf.Clamp01(_engineMasterVolume) * (_player != null && _player.IsOwner ? _localVolume : _remoteVolume);
             _oneShotSource.PlayOneShot(clip, Mathf.Clamp01(volumeScale));
         }
 
