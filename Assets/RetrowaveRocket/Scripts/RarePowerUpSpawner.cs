@@ -298,7 +298,7 @@ namespace RetrowaveRocket
 
             if (_globalSpawnCue != null)
             {
-                AudioSource.PlayClipAtPoint(_globalSpawnCue, position, RetrowaveGameSettings.SfxVolume);
+                RetrowaveArenaAudio.PlayRarePowerCue(_globalSpawnCue, position, 0.92f);
             }
         }
     }

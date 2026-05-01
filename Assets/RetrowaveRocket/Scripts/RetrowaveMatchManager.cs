@@ -1212,6 +1212,7 @@ namespace RetrowaveRocket
         [Rpc(SendTo.ClientsAndHost)]
         private void BeginGoalCelebrationRpc(int scoringTeamValue, string scorerName, int blueScore, int pinkScore, float durationSeconds)
         {
+            RetrowaveArenaAudio.PlayGoalCelebration(Vector3.zero);
             RetrowaveGameBootstrap.Instance?.BeginGoalCelebration(
                 (RetrowaveTeam)scoringTeamValue,
                 scorerName,

@@ -47,13 +47,19 @@ namespace RetrowaveRocket
 
         private GameObject _visualRoot;
         private Transform _discTransform;
+        private Transform _pulseTransform;
         private MeshRenderer _discRenderer;
+        private MeshRenderer _pulseRenderer;
         private Light _objectiveLight;
         private TextMeshPro _label;
         private Material _discMaterial;
+        private Material _pulseMaterial;
         private float _nextObjectiveAt;
         private float _activeEndsAt;
         private float _nextHoldStyleAwardAt;
+        private float _pulseStartedAt = -10f;
+        private float _pulseDuration = 0.58f;
+        private int _lastProgressPulseBucket;
 
         public RetrowaveArenaObjectiveType ActiveObjectiveType => ActiveType;
         public float CaptureProgressNormalized => Mathf.Clamp01(_captureProgress.Value);
@@ -126,6 +132,8 @@ namespace RetrowaveRocket
 
         private void LateUpdate()
         {
+            UpdatePulseVisual();
+
             if (_label == null || !_label.gameObject.activeInHierarchy)
             {
                 return;
@@ -235,6 +243,7 @@ namespace RetrowaveRocket
                 player.AwardStyleServer(RetrowaveStyleEvent.ObjectiveCapture, activeType == RetrowaveArenaObjectiveType.WallGate ? 1.2f : 1f);
             }
 
+            ObjectiveCapturedClientRpc(_objectivePosition.Value, (int)activeType, (int)capturingTeam);
             DeactivateObjectiveServer(scheduleNext: true);
         }
 
@@ -279,6 +288,7 @@ namespace RetrowaveRocket
             _captureProgress.Value = 0f;
             _activeEndsAt = Time.time + Mathf.Max(4f, _activeDuration);
             _nextHoldStyleAwardAt = Time.time + 1f;
+            _lastProgressPulseBucket = 0;
             RefreshVisuals();
         }
 
@@ -289,6 +299,7 @@ namespace RetrowaveRocket
             _captureProgress.Value = 0f;
             _activeEndsAt = 0f;
             _nextHoldStyleAwardAt = 0f;
+            _lastProgressPulseBucket = 0;
             RefreshVisuals();
 
             if (scheduleNext)
@@ -397,6 +408,19 @@ namespace RetrowaveRocket
             RefreshVisuals();
         }
 
+        [ClientRpc]
+        private void ObjectiveCapturedClientRpc(Vector3 position, int objectiveTypeValue, int capturingTeamValue)
+        {
+            var objectiveColor = RetrowaveArenaObjectiveCatalog.GetColor((RetrowaveArenaObjectiveType)objectiveTypeValue);
+            var teamColor = capturingTeamValue switch
+            {
+                (int)RetrowaveTeam.Blue => RetrowaveStyle.BlueGlow,
+                (int)RetrowaveTeam.Pink => RetrowaveStyle.PinkGlow,
+                _ => objectiveColor,
+            };
+            StartCapturePulse(position, Color.Lerp(objectiveColor, teamColor, 0.72f), playAudio: true);
+        }
+
         private void EnsureVisuals()
         {
             if (_visualRoot != null)
@@ -427,6 +451,28 @@ namespace RetrowaveRocket
                 0.82f,
                 0f);
             _discRenderer.sharedMaterial = _discMaterial;
+
+            var pulse = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            pulse.name = "Objective Capture Pulse";
+            pulse.transform.SetParent(transform, false);
+            pulse.transform.localScale = new Vector3(_radius * 2f, 0.012f, _radius * 2f);
+            _pulseTransform = pulse.transform;
+            _pulseRenderer = pulse.GetComponent<MeshRenderer>();
+
+            var pulseCollider = pulse.GetComponent<Collider>();
+
+            if (pulseCollider != null)
+            {
+                Destroy(pulseCollider);
+            }
+
+            _pulseMaterial = RetrowaveStyle.CreateTransparentLitMaterial(
+                new Color(0.48f, 1f, 0.72f, 0f),
+                new Color(0.48f, 1f, 0.72f, 1f) * 2.8f,
+                0.74f,
+                0f);
+            _pulseRenderer.sharedMaterial = _pulseMaterial;
+            _pulseRenderer.enabled = false;
 
             var lightObject = new GameObject("Objective Light");
             lightObject.transform.SetParent(_visualRoot.transform, false);
@@ -474,6 +520,17 @@ namespace RetrowaveRocket
             };
             var progress = Mathf.Clamp01(_captureProgress.Value);
             var displayColor = Color.Lerp(objectiveColor, teamColor, 0.7f);
+            var progressBucket = Mathf.FloorToInt(progress * 4f);
+
+            if (progress <= 0.01f)
+            {
+                _lastProgressPulseBucket = 0;
+            }
+            else if (progressBucket > _lastProgressPulseBucket && progress < 0.98f)
+            {
+                _lastProgressPulseBucket = progressBucket;
+                StartCapturePulse(_objectivePosition.Value, displayColor, playAudio: false);
+            }
 
             if (_discTransform != null)
             {
@@ -513,6 +570,63 @@ namespace RetrowaveRocket
             if (material != null && material.HasProperty(propertyName))
             {
                 material.SetColor(propertyName, color);
+            }
+        }
+
+        private void StartCapturePulse(Vector3 position, Color color, bool playAudio)
+        {
+            EnsureVisuals();
+
+            if (_pulseTransform == null || _pulseRenderer == null || _pulseMaterial == null)
+            {
+                return;
+            }
+
+            _pulseStartedAt = Time.time;
+            _pulseTransform.position = position + Vector3.up * 0.055f;
+            _pulseRenderer.enabled = true;
+            SetMaterialColor(_pulseMaterial, "_BaseColor", new Color(color.r, color.g, color.b, 0.34f));
+            SetMaterialColor(_pulseMaterial, "_Color", new Color(color.r, color.g, color.b, 0.34f));
+            SetMaterialColor(_pulseMaterial, "_EmissionColor", color * 3.1f);
+
+            if (playAudio)
+            {
+                RetrowaveArenaAudio.PlayObjectiveCapture(position);
+            }
+        }
+
+        private void UpdatePulseVisual()
+        {
+            if (_pulseTransform == null || _pulseRenderer == null || _pulseMaterial == null || !_pulseRenderer.enabled)
+            {
+                return;
+            }
+
+            var t = Mathf.Clamp01((Time.time - _pulseStartedAt) / Mathf.Max(0.05f, _pulseDuration));
+
+            if (t >= 1f)
+            {
+                _pulseRenderer.enabled = false;
+                return;
+            }
+
+            var ease = 1f - Mathf.Pow(1f - t, 2f);
+            var scale = Mathf.Lerp(_radius * 1.1f, _radius * 2.85f, ease);
+            var alpha = Mathf.Lerp(0.34f, 0f, t);
+            _pulseTransform.localScale = new Vector3(scale, 0.012f, scale);
+
+            if (_pulseMaterial.HasProperty("_BaseColor"))
+            {
+                var baseColor = _pulseMaterial.GetColor("_BaseColor");
+                baseColor.a = alpha;
+                _pulseMaterial.SetColor("_BaseColor", baseColor);
+            }
+
+            if (_pulseMaterial.HasProperty("_Color"))
+            {
+                var baseColor = _pulseMaterial.GetColor("_Color");
+                baseColor.a = alpha;
+                _pulseMaterial.SetColor("_Color", baseColor);
             }
         }
 

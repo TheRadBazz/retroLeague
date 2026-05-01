@@ -17,6 +17,8 @@ namespace RetrowaveRocket
         private int _activeSourceIndex;
         private RetrowaveMusicContext _activeContext = RetrowaveMusicContext.None;
         private AudioClip _activeClip;
+        private float _duckUntilRealtime;
+        private float _duckMultiplier = 1f;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Install()
@@ -89,11 +91,11 @@ namespace RetrowaveRocket
                 return;
             }
 
+            RefreshActiveSourceVolume();
             var cue = _profile.GetCue(_activeContext);
 
             if (cue == null || cue.Loop || _sources[_activeSourceIndex].isPlaying)
             {
-                RefreshActiveSourceVolume();
                 return;
             }
 
@@ -260,6 +262,18 @@ namespace RetrowaveRocket
             RefreshActiveSourceVolume();
         }
 
+        public static void DuckForPriorityCue(float multiplier, float durationSeconds)
+        {
+            if (_instance == null)
+            {
+                return;
+            }
+
+            _instance._duckMultiplier = Mathf.Min(_instance._duckMultiplier, Mathf.Clamp(multiplier, 0.1f, 1f));
+            _instance._duckUntilRealtime = Mathf.Max(_instance._duckUntilRealtime, Time.unscaledTime + Mathf.Max(0f, durationSeconds));
+            _instance.RefreshActiveSourceVolume();
+        }
+
         private void RefreshActiveSourceVolume()
         {
             if (_profile == null || _activeContext == RetrowaveMusicContext.None || _fadeRoutine != null)
@@ -281,7 +295,18 @@ namespace RetrowaveRocket
         {
             return cue == null
                 ? 0f
-                : cue.Volume * _profile.MasterVolume * RetrowaveGameSettings.MusicVolume;
+                : cue.Volume * _profile.MasterVolume * RetrowaveGameSettings.MusicVolume * GetDuckingMultiplier();
+        }
+
+        private float GetDuckingMultiplier()
+        {
+            if (Time.unscaledTime <= _duckUntilRealtime)
+            {
+                return _duckMultiplier;
+            }
+
+            _duckMultiplier = Mathf.MoveTowards(_duckMultiplier, 1f, Time.unscaledDeltaTime * 1.4f);
+            return _duckMultiplier;
         }
     }
 }

@@ -185,7 +185,7 @@ namespace RetrowaveRocket
         {
             if (_expireCue != null)
             {
-                AudioSource.PlayClipAtPoint(_expireCue, transform.position, RetrowaveGameSettings.SfxVolume);
+                RetrowaveArenaAudio.PlayCue(_expireCue, transform.position, RetrowaveAudioPriority.Gameplay, 0.82f, 0.72f);
             }
         }
 

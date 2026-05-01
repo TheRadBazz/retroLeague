@@ -82,7 +82,14 @@ namespace RetrowaveRocket
 
             player.ApplyPowerUp((RetrowavePowerUpType)_powerUpType.Value);
             _isAvailable.Value = false;
+            PlayPickupFeedbackClientRpc(transform.position);
             StartCoroutine(RespawnRoutine());
+        }
+
+        [ClientRpc]
+        private void PlayPickupFeedbackClientRpc(Vector3 position)
+        {
+            RetrowaveArenaAudio.PlayImpact(position, 0.34f);
         }
 
         private IEnumerator RespawnRoutine()

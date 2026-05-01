@@ -221,6 +221,7 @@ namespace RetrowaveRocket
         public bool IsGroundedForHud => _isGrounded;
         public Rigidbody Body => _rigidbody;
         public ulong ControllingClientId => OwnerClientId;
+        public bool BoostFxActive => _boostFx.Value;
         public float EngineAudioThrottle => IsOwner ? _cachedThrottle : _engineAudioThrottle.Value;
         public bool EngineAudioBoosting => _engineAudioBoosting.Value;
         public RetrowaveUtilityRole UtilityRole => (RetrowaveUtilityRole)_utilityRoleValue.Value;

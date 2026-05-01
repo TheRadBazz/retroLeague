@@ -129,10 +129,7 @@ namespace RetrowaveRocket
 
             StartCoroutine(TrailVisualRoutine(ownerObject.transform, duration));
 
-            if (_activateCue != null)
-            {
-                AudioSource.PlayClipAtPoint(_activateCue, ownerObject.transform.position, RetrowaveGameSettings.SfxVolume);
-            }
+            RetrowaveArenaAudio.PlayRarePowerCue(_activateCue, ownerObject.transform.position, 1f);
         }
 
         private IEnumerator TrailVisualRoutine(Transform owner, float duration)

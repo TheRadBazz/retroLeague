@@ -183,10 +183,7 @@ namespace RetrowaveRocket
         [ClientRpc]
         private void DetonateClientRpc()
         {
-            if (_detonateCue != null)
-            {
-                AudioSource.PlayClipAtPoint(_detonateCue, transform.position, RetrowaveGameSettings.SfxVolume);
-            }
+            RetrowaveArenaAudio.PlayRarePowerCue(_detonateCue, transform.position, 1.12f);
         }
 
         private IEnumerator DespawnAfterDelay()

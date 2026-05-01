@@ -95,7 +95,7 @@ namespace RetrowaveRocket
 
             if (IsActive && _spawnCue != null)
             {
-                AudioSource.PlayClipAtPoint(_spawnCue, transform.position, RetrowaveGameSettings.SfxVolume);
+                RetrowaveArenaAudio.PlayRarePowerCue(_spawnCue, transform.position, 0.92f);
             }
         }
 
@@ -339,17 +339,15 @@ namespace RetrowaveRocket
         {
             if (_spawnCue != null)
             {
-                AudioSource.PlayClipAtPoint(_spawnCue, transform.position, RetrowaveGameSettings.SfxVolume);
+                RetrowaveArenaAudio.PlayRarePowerCue(_spawnCue, transform.position, 0.92f);
             }
         }
 
         [ClientRpc]
         private void PlayCollectedClientRpc()
         {
-            if (_collectedCue != null)
-            {
-                AudioSource.PlayClipAtPoint(_collectedCue, transform.position, RetrowaveGameSettings.SfxVolume);
-            }
+            RetrowaveArenaAudio.PlayRarePowerCue(_collectedCue, transform.position, 1f);
+            RetrowaveArenaAudio.PlayCrowdCheer(RetrowaveCrowdCheerIntensity.Soft, transform.position, 0.36f);
         }
 
         private void HandleStateChanged(int _, int __)

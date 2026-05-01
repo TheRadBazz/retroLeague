@@ -213,6 +213,7 @@ namespace RetrowaveRocket
                 ref desiredVelocityChange,
                 touchStrength);
             desiredVelocityChange = Mathf.Clamp(desiredVelocityChange, MinimumTouchSpeed, MaxHitVelocityChange * 1.45f);
+            PlayBallImpactClientRpc(contactPoint, Mathf.Clamp01(touchStrength + desiredVelocityChange / (MaxHitVelocityChange * 1.45f) * 0.35f));
 
             _rigidbody.AddForce(launchDirection * desiredVelocityChange, ForceMode.VelocityChange);
             PreservePlayerMomentum(player, playerForward, contactNormal, desiredVelocityChange, frontFactor, centerFactor);
@@ -224,6 +225,12 @@ namespace RetrowaveRocket
             {
                 _rigidbody.AddTorque(hitSpin, ForceMode.VelocityChange);
             }
+        }
+
+        [ClientRpc]
+        private void PlayBallImpactClientRpc(Vector3 contactPoint, float intensity)
+        {
+            RetrowaveArenaAudio.PlayImpact(contactPoint, intensity);
         }
 
         private static void PreservePlayerMomentum(

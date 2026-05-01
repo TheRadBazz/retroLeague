@@ -4717,6 +4717,7 @@ namespace RetrowaveRocket
             prefab.AddComponent<VehicleStyleMeter>();
             prefab.AddComponent<RetrowavePlayerController>();
             prefab.AddComponent<RetrowaveVehicleEngineAudio>();
+            prefab.AddComponent<RetrowaveVehicleProductionFx>();
             prefab.AddComponent<RarePowerUpInventory>();
             prefab.AddComponent<NeonSnareTrailPowerUp>();
             prefab.AddComponent<GravityBombPowerUp>();

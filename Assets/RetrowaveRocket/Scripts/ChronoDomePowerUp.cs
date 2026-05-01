@@ -69,10 +69,7 @@ namespace RetrowaveRocket
         [ClientRpc]
         private void PlayDeployCueClientRpc(Vector3 position)
         {
-            if (_deployCue != null)
-            {
-                AudioSource.PlayClipAtPoint(_deployCue, position, RetrowaveGameSettings.SfxVolume);
-            }
+            RetrowaveArenaAudio.PlayRarePowerCue(_deployCue, position, 0.96f);
         }
     }
 }
