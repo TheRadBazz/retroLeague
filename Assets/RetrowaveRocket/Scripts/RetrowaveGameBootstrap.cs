@@ -107,6 +107,7 @@ namespace RetrowaveRocket
         private float _goalCelebrationEndsAtRealtime;
         private RetrowaveTeam _goalCelebrationTeam;
         private string _goalCelebrationScorer = string.Empty;
+        private string _goalCelebrationAssist = string.Empty;
         private int _goalCelebrationBlueScore;
         private int _goalCelebrationPinkScore;
         private GameObject _gameplayMenuRoot;
@@ -146,6 +147,9 @@ namespace RetrowaveRocket
         private GameObject _gameplayHudScoreboardRoot;
         private GameObject _gameplayHudGoalRoot;
         private GameObject _gameplayHudCountdownRoot;
+        private GameObject _gameplayHudLineupRoot;
+        private GameObject _gameplayHudRoundStatsRoot;
+        private GameObject _gameplayHudMvpRoot;
         private TMP_Text _hudScoreStateText;
         private TMP_Text _hudScoreClockText;
         private TMP_Text _hudBlueScoreText;
@@ -198,11 +202,31 @@ namespace RetrowaveRocket
         private TMP_Text _hudGoalDetailText;
         private TMP_Text _hudCountdownLabelText;
         private TMP_Text _hudCountdownValueText;
+        private TMP_Text _hudLineupTitleText;
+        private TMP_Text _hudLineupSummaryText;
+        private TMP_Text _hudLineupBlueText;
+        private TMP_Text _hudLineupPinkText;
+        private TMP_Text _hudRoundStatsTitleText;
+        private TMP_Text _hudRoundStatsSummaryText;
+        private TMP_Text _hudRoundStatsBodyText;
+        private TMP_Text _hudMvpTitleText;
+        private TMP_Text _hudMvpNameText;
+        private TMP_Text _hudMvpDetailText;
         private bool _gameplayHudSessionVisible;
         private bool _hudInfoIntroAutoHidePending;
         private float _hudInfoIntroHideAtRealtime;
         private int _observedStyleAwardSerial;
         private float _styleNotificationHideAtRealtime;
+        private int _lineupRoundNumber;
+        private int _lineupRoundCount;
+        private float _lineupVisibleUntilRealtime;
+        private int _roundStatsRoundNumber;
+        private int _roundStatsBlueScore;
+        private int _roundStatsPinkScore;
+        private float _roundStatsVisibleUntilRealtime;
+        private ulong _mvpClientId = ulong.MaxValue;
+        private int _mvpScore;
+        private float _mvpVisibleUntilRealtime;
         private GameObject _podiumPresentationRoot;
         private bool _podiumCameraActive;
         private bool _sessionShutdownInProgress;
@@ -524,17 +548,55 @@ namespace RetrowaveRocket
             }
         }
 
-        public void BeginGoalCelebration(RetrowaveTeam scoringTeam, string scorerName, int blueScore, int pinkScore, float durationSeconds)
+        public void BeginGoalCelebration(RetrowaveTeam scoringTeam, string scorerName, string assistName, int blueScore, int pinkScore, float durationSeconds)
         {
             _goalCelebrationVisible = true;
             _goalCelebrationTeam = scoringTeam;
             _goalCelebrationScorer = string.IsNullOrWhiteSpace(scorerName)
                 ? (scoringTeam == RetrowaveTeam.Blue ? "Blue Team" : "Pink Team")
                 : scorerName;
+            _goalCelebrationAssist = string.IsNullOrWhiteSpace(assistName) ? string.Empty : assistName;
             _goalCelebrationBlueScore = blueScore;
             _goalCelebrationPinkScore = pinkScore;
             _goalCelebrationEndsAtRealtime = Time.unscaledTime + Mathf.Max(0.25f, durationSeconds);
             SetLocalTimeScale(0.2f);
+        }
+
+        public void ShowPreMatchLineup(int roundNumber, int roundCount, float durationSeconds)
+        {
+            if (_gameplayHudRoot == null && IsGameplayScene(SceneManager.GetActiveScene()))
+            {
+                EnsureGameplayHudOverlay();
+            }
+
+            _lineupRoundNumber = Mathf.Max(1, roundNumber);
+            _lineupRoundCount = Mathf.Max(1, roundCount);
+            _lineupVisibleUntilRealtime = Time.unscaledTime + Mathf.Max(0.25f, durationSeconds);
+        }
+
+        public void ShowRoundStatCards(int completedRound, int blueScore, int pinkScore, float durationSeconds)
+        {
+            if (_gameplayHudRoot == null && IsGameplayScene(SceneManager.GetActiveScene()))
+            {
+                EnsureGameplayHudOverlay();
+            }
+
+            _roundStatsRoundNumber = Mathf.Max(1, completedRound);
+            _roundStatsBlueScore = Mathf.Max(0, blueScore);
+            _roundStatsPinkScore = Mathf.Max(0, pinkScore);
+            _roundStatsVisibleUntilRealtime = Time.unscaledTime + Mathf.Max(0.25f, durationSeconds);
+        }
+
+        public void ShowMvpMoment(ulong mvpClientId, int mvpScore, float durationSeconds)
+        {
+            if (_gameplayHudRoot == null && IsGameplayScene(SceneManager.GetActiveScene()))
+            {
+                EnsureGameplayHudOverlay();
+            }
+
+            _mvpClientId = mvpClientId;
+            _mvpScore = Mathf.Max(0, mvpScore);
+            _mvpVisibleUntilRealtime = Time.unscaledTime + Mathf.Max(0.25f, durationSeconds);
         }
 
         private void EnsureNetworkRuntime()
@@ -556,7 +618,7 @@ namespace RetrowaveRocket
             _networkManager.NetworkConfig.SpawnTimeout = 5f;
             _networkManager.NetworkConfig.TickRate = NetworkSimulationTickRate;
             _networkManager.NetworkConfig.EnsureNetworkVariableLengthSafety = true;
-            NetworkTransform.InterpolationBufferTickOffset = Mathf.Max(NetworkTransform.InterpolationBufferTickOffset, ClientInterpolationBufferTicks);
+            NetworkTransform.InterpolationBufferTickOffset = ClientInterpolationBufferTicks;
 
             if (_networkManager.NetworkConfig.Prefabs == null)
             {
@@ -1218,7 +1280,7 @@ namespace RetrowaveRocket
                 scoreStrip.transform,
                 "State",
                 "WARMUP",
-                16f,
+                14f,
                 FontStyles.Bold,
                 TextAlignmentOptions.Center,
                 new Vector2(0.5f, 1f),
@@ -1851,10 +1913,185 @@ namespace RetrowaveRocket
                 new Vector2(380f, 132f),
                 Color.white);
 
+            _gameplayHudLineupRoot = CreateHudPanel(
+                _gameplayHudRoot.transform,
+                "PreMatchLineup",
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0f, -210f),
+                new Vector2(920f, 250f),
+                new Color(0.02f, 0.04f, 0.09f, 0.92f),
+                new Color(0.12f, 0.8f, 1f, 0.34f));
+
+            _hudLineupTitleText = CreateHudText(
+                _gameplayHudLineupRoot.transform,
+                "Title",
+                "MATCH LINEUP",
+                25f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Center,
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0f, -18f),
+                new Vector2(560f, 34f),
+                Color.white);
+
+            _hudLineupSummaryText = CreateHudText(
+                _gameplayHudLineupRoot.transform,
+                "Summary",
+                string.Empty,
+                15f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Center,
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0f, -52f),
+                new Vector2(620f, 24f),
+                new Color(0.64f, 0.9f, 1f, 0.96f));
+
+            _hudLineupBlueText = CreateLineupColumn(
+                _gameplayHudLineupRoot.transform,
+                "BlueLineup",
+                new Vector2(-230f, -86f),
+                "BLUE TEAM",
+                RetrowaveStyle.BlueGlow);
+
+            _hudLineupPinkText = CreateLineupColumn(
+                _gameplayHudLineupRoot.transform,
+                "PinkLineup",
+                new Vector2(230f, -86f),
+                "PINK TEAM",
+                RetrowaveStyle.PinkBase);
+
+            _gameplayHudRoundStatsRoot = CreateHudPanel(
+                _gameplayHudRoot.transform,
+                "RoundStatCards",
+                new Vector2(0.5f, 0f),
+                new Vector2(0.5f, 0f),
+                new Vector2(0.5f, 0f),
+                new Vector2(0f, 64f),
+                new Vector2(860f, 232f),
+                new Color(0.03f, 0.04f, 0.09f, 0.94f),
+                new Color(0.42f, 1f, 0.72f, 0.32f));
+
+            _hudRoundStatsTitleText = CreateHudText(
+                _gameplayHudRoundStatsRoot.transform,
+                "Title",
+                "ROUND STATS",
+                25f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Center,
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0f, -18f),
+                new Vector2(620f, 34f),
+                Color.white);
+
+            _hudRoundStatsSummaryText = CreateHudText(
+                _gameplayHudRoundStatsRoot.transform,
+                "Summary",
+                string.Empty,
+                14f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Center,
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0f, -54f),
+                new Vector2(720f, 26f),
+                new Color(0.68f, 0.92f, 1f, 0.96f));
+
+            _hudRoundStatsBodyText = CreateHudText(
+                _gameplayHudRoundStatsRoot.transform,
+                "Body",
+                string.Empty,
+                16f,
+                FontStyles.Bold,
+                TextAlignmentOptions.TopLeft,
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0f, -88f),
+                new Vector2(760f, 118f),
+                new Color(0.92f, 0.98f, 1f, 0.98f));
+            _hudRoundStatsBodyText.lineSpacing = 2f;
+            _hudRoundStatsBodyText.textWrappingMode = TextWrappingModes.NoWrap;
+            _hudRoundStatsBodyText.overflowMode = TextOverflowModes.Ellipsis;
+
+            _gameplayHudMvpRoot = CreateHudPanel(
+                _gameplayHudRoot.transform,
+                "MvpMoment",
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0f, 238f),
+                new Vector2(720f, 180f),
+                new Color(0.03f, 0.03f, 0.08f, 0.95f),
+                new Color(1f, 0.78f, 0.18f, 0.38f));
+
+            _hudMvpTitleText = CreateHudText(
+                _gameplayHudMvpRoot.transform,
+                "Title",
+                "MVP MOMENT",
+                21f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Center,
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0f, -16f),
+                new Vector2(520f, 30f),
+                new Color(1f, 0.82f, 0.24f, 1f));
+
+            _hudMvpNameText = CreateHudText(
+                _gameplayHudMvpRoot.transform,
+                "Name",
+                string.Empty,
+                31f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Center,
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0f, 8f),
+                new Vector2(600f, 42f),
+                Color.white);
+            _hudMvpNameText.enableAutoSizing = true;
+            _hudMvpNameText.fontSizeMin = 22f;
+            _hudMvpNameText.fontSizeMax = 31f;
+            _hudMvpNameText.textWrappingMode = TextWrappingModes.NoWrap;
+            _hudMvpNameText.overflowMode = TextOverflowModes.Ellipsis;
+
+            _hudMvpDetailText = CreateHudText(
+                _gameplayHudMvpRoot.transform,
+                "Detail",
+                string.Empty,
+                15f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Center,
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0f, -48f),
+                new Vector2(640f, 58f),
+                new Color(0.94f, 0.98f, 1f, 0.96f));
+            _hudMvpDetailText.enableAutoSizing = true;
+            _hudMvpDetailText.fontSizeMin = 11f;
+            _hudMvpDetailText.fontSizeMax = 15f;
+            _hudMvpDetailText.textWrappingMode = TextWrappingModes.Normal;
+            _hudMvpDetailText.overflowMode = TextOverflowModes.Ellipsis;
+
             _gameplayHudInfoCollapsedRoot.SetActive(false);
             _gameplayHudScoreboardRoot.SetActive(false);
             _gameplayHudGoalRoot.SetActive(false);
             _gameplayHudCountdownRoot.SetActive(false);
+            _gameplayHudLineupRoot.SetActive(false);
+            _gameplayHudRoundStatsRoot.SetActive(false);
+            _gameplayHudMvpRoot.SetActive(false);
         }
 
         private void DestroyGameplayHudOverlay()
@@ -1870,6 +2107,9 @@ namespace RetrowaveRocket
             _gameplayHudScoreboardRoot = null;
             _gameplayHudGoalRoot = null;
             _gameplayHudCountdownRoot = null;
+            _gameplayHudLineupRoot = null;
+            _gameplayHudRoundStatsRoot = null;
+            _gameplayHudMvpRoot = null;
             _hudScoreStateText = null;
             _hudScoreClockText = null;
             _hudBlueScoreText = null;
@@ -1922,8 +2162,19 @@ namespace RetrowaveRocket
             _hudGoalDetailText = null;
             _hudCountdownLabelText = null;
             _hudCountdownValueText = null;
+            _hudLineupTitleText = null;
+            _hudLineupSummaryText = null;
+            _hudLineupBlueText = null;
+            _hudLineupPinkText = null;
+            _hudRoundStatsTitleText = null;
+            _hudRoundStatsSummaryText = null;
+            _hudRoundStatsBodyText = null;
+            _hudMvpTitleText = null;
+            _hudMvpNameText = null;
+            _hudMvpDetailText = null;
             _observedStyleAwardSerial = 0;
             _styleNotificationHideAtRealtime = 0f;
+            ClearMatchPresentationState();
         }
 
         private void RefreshGameplayHudState()
@@ -1944,6 +2195,7 @@ namespace RetrowaveRocket
                 ResetHudInfoIntroState();
                 HideStyleNotification(resetObservedSerial: true);
                 HideTargetPointers();
+                HideMatchPresentationHud();
                 return;
             }
 
@@ -2364,7 +2616,9 @@ namespace RetrowaveRocket
 
                 if (_hudGoalDetailText != null)
                 {
-                    _hudGoalDetailText.text = $"{_goalCelebrationScorer} found the finish. Resetting field...";
+                    _hudGoalDetailText.text = string.IsNullOrWhiteSpace(_goalCelebrationAssist)
+                        ? $"{_goalCelebrationScorer} scores. Setting up kickoff..."
+                        : $"{_goalCelebrationScorer} scores. Assist: {_goalCelebrationAssist}. Setting up kickoff...";
                 }
             }
 
@@ -2389,6 +2643,8 @@ namespace RetrowaveRocket
                     _hudCountdownValueText.text = countdownValue <= 0 ? "GO" : countdownValue.ToString();
                 }
             }
+
+            RefreshMatchPresentationHud(matchManager);
         }
 
         private string BuildScoreboardSectionText(RetrowaveLobbyRole role, RetrowaveMatchManager matchManager, bool includeUnselected = false)
@@ -2435,6 +2691,20 @@ namespace RetrowaveRocket
                     return assistCompare;
                 }
 
+                var saveCompare = right.Saves.CompareTo(left.Saves);
+
+                if (saveCompare != 0)
+                {
+                    return saveCompare;
+                }
+
+                var styleCompare = right.StyleScore.CompareTo(left.StyleScore);
+
+                if (styleCompare != 0)
+                {
+                    return styleCompare;
+                }
+
                 return left.ClientId.CompareTo(right.ClientId);
             });
 
@@ -2445,8 +2715,8 @@ namespace RetrowaveRocket
 
             var builder = new StringBuilder(entries.Count * 56);
             builder.Append("<mspace=0.56em>");
-            builder.AppendLine("PLAYER                  G  A  PING");
-            builder.AppendLine("-----------------------------------");
+            builder.AppendLine("PLAYER                G A S STL OBJ PWR PING");
+            builder.AppendLine("---------------------------------------------");
 
             for (var i = 0; i < entries.Count; i++)
             {
@@ -2463,10 +2733,18 @@ namespace RetrowaveRocket
                     playerLabel += " [Next]";
                 }
 
-                builder.Append(FormatScoreboardName(playerLabel).PadRight(22));
+                builder.Append(FormatScoreboardName(playerLabel, 20).PadRight(20));
                 builder.Append(entry.Goals.ToString().PadLeft(2));
                 builder.Append(" ");
-                builder.Append(entry.Assists.ToString().PadLeft(2));
+                builder.Append(entry.Assists.ToString().PadLeft(1));
+                builder.Append(" ");
+                builder.Append(entry.Saves.ToString().PadLeft(1));
+                builder.Append(" ");
+                builder.Append(FormatCompactStat(entry.StyleScore).PadLeft(3));
+                builder.Append(" ");
+                builder.Append(entry.ObjectiveCaptures.ToString().PadLeft(3));
+                builder.Append(" ");
+                builder.Append(entry.PowerUpHits.ToString().PadLeft(3));
                 builder.Append(" ");
                 builder.Append($"{entry.PingMs}ms".PadLeft(6));
                 builder.AppendLine();
@@ -2474,6 +2752,280 @@ namespace RetrowaveRocket
 
             builder.Append("</mspace>");
             return builder.ToString();
+        }
+
+        private void RefreshMatchPresentationHud(RetrowaveMatchManager matchManager)
+        {
+            var now = Time.unscaledTime;
+            var showLineup = matchManager != null
+                             && !_goalCelebrationVisible
+                             && now < _lineupVisibleUntilRealtime;
+            var showRoundStats = matchManager != null
+                                 && !_goalCelebrationVisible
+                                 && now < _roundStatsVisibleUntilRealtime;
+            var showMvp = matchManager != null
+                          && !_goalCelebrationVisible
+                          && now < _mvpVisibleUntilRealtime;
+
+            if (_gameplayHudLineupRoot != null)
+            {
+                _gameplayHudLineupRoot.SetActive(showLineup);
+            }
+
+            if (_gameplayHudRoundStatsRoot != null)
+            {
+                _gameplayHudRoundStatsRoot.SetActive(showRoundStats);
+            }
+
+            if (_gameplayHudMvpRoot != null)
+            {
+                _gameplayHudMvpRoot.SetActive(showMvp);
+            }
+
+            if (showLineup)
+            {
+                RefreshLineupPanel(matchManager);
+            }
+
+            if (showRoundStats)
+            {
+                RefreshRoundStatsPanel(matchManager);
+            }
+
+            if (showMvp)
+            {
+                RefreshMvpPanel(matchManager);
+            }
+        }
+
+        private void RefreshLineupPanel(RetrowaveMatchManager matchManager)
+        {
+            if (_hudLineupTitleText != null)
+            {
+                _hudLineupTitleText.text = "PRE-MATCH LINEUP";
+            }
+
+            if (_hudLineupSummaryText != null)
+            {
+                _hudLineupSummaryText.text = $"Round {_lineupRoundNumber}/{Mathf.Max(1, _lineupRoundCount)}  •  Blue {matchManager.BlueScore} - {matchManager.PinkScore} Pink";
+            }
+
+            if (_hudLineupBlueText != null)
+            {
+                _hudLineupBlueText.text = BuildLineupColumnText(RetrowaveLobbyRole.Blue, matchManager);
+            }
+
+            if (_hudLineupPinkText != null)
+            {
+                _hudLineupPinkText.text = BuildLineupColumnText(RetrowaveLobbyRole.Pink, matchManager);
+            }
+        }
+
+        private void RefreshRoundStatsPanel(RetrowaveMatchManager matchManager)
+        {
+            if (_hudRoundStatsTitleText != null)
+            {
+                _hudRoundStatsTitleText.text = $"ROUND {_roundStatsRoundNumber} STAT CARDS";
+            }
+
+            if (_hudRoundStatsSummaryText != null)
+            {
+                _hudRoundStatsSummaryText.text = $"Blue {_roundStatsBlueScore}  -  {_roundStatsPinkScore} Pink";
+            }
+
+            if (_hudRoundStatsBodyText != null)
+            {
+                _hudRoundStatsBodyText.text = BuildRoundStatCardsText(matchManager);
+            }
+        }
+
+        private void RefreshMvpPanel(RetrowaveMatchManager matchManager)
+        {
+            var entry = default(RetrowaveLobbyEntry);
+            var hasEntry = matchManager != null && matchManager.TryGetLobbyEntry(_mvpClientId, out entry);
+            var displayName = hasEntry ? FormatScoreboardName(entry.DisplayName.ToString(), 24) : "Match MVP";
+            var detail = hasEntry
+                ? $"{GetRoleLabel(entry)}  |  MVP {_mvpScore}\nG {entry.Goals}   A {entry.Assists}   S {entry.Saves}   STYLE {FormatCompactStat(entry.StyleScore)}   OBJ {entry.ObjectiveCaptures}   PWR {entry.PowerUpHits}"
+                : $"MVP {_mvpScore}";
+
+            if (_hudMvpTitleText != null)
+            {
+                _hudMvpTitleText.text = "MVP MOMENT";
+            }
+
+            if (_hudMvpNameText != null)
+            {
+                _hudMvpNameText.text = displayName;
+                _hudMvpNameText.color = hasEntry && TryGetTeamFromEntry(entry, out var team)
+                    ? RetrowaveStyle.GetTeamGlow(team)
+                    : Color.white;
+            }
+
+            if (_hudMvpDetailText != null)
+            {
+                _hudMvpDetailText.text = detail;
+            }
+        }
+
+        private string BuildLineupColumnText(RetrowaveLobbyRole role, RetrowaveMatchManager matchManager)
+        {
+            var entries = new List<RetrowaveLobbyEntry>();
+
+            if (matchManager != null)
+            {
+                for (var i = 0; i < matchManager.LobbyEntries.Count; i++)
+                {
+                    var entry = matchManager.LobbyEntries[i];
+
+                    if (!entry.HasSelectedRole || entry.ActiveRole != role)
+                    {
+                        continue;
+                    }
+
+                    entries.Add(entry);
+                }
+            }
+
+            entries.Sort(static (left, right) => left.ClientId.CompareTo(right.ClientId));
+
+            if (entries.Count == 0)
+            {
+                return "Waiting for drivers";
+            }
+
+            var builder = new StringBuilder(entries.Count * 34);
+
+            for (var i = 0; i < entries.Count; i++)
+            {
+                var entry = entries[i];
+                builder.Append(i + 1);
+                builder.Append(". ");
+                builder.Append(FormatScoreboardName(entry.DisplayName.ToString(), 28));
+
+                if (entry.IsHost)
+                {
+                    builder.Append(" [Host]");
+                }
+
+                builder.AppendLine();
+            }
+
+            return builder.ToString();
+        }
+
+        private string BuildRoundStatCardsText(RetrowaveMatchManager matchManager)
+        {
+            if (matchManager == null || matchManager.LobbyEntries.Count == 0)
+            {
+                return "Stats are syncing...";
+            }
+
+            var builder = new StringBuilder(384);
+            builder.Append("<mspace=0.54em>");
+            builder.AppendLine(TopStatLine("GOALS", matchManager, static entry => entry.Goals));
+            builder.AppendLine(TopStatLine("ASSISTS", matchManager, static entry => entry.Assists));
+            builder.AppendLine(TopStatLine("SAVES", matchManager, static entry => entry.Saves));
+            builder.AppendLine(TopStatLine("STYLE", matchManager, static entry => entry.StyleScore, compactValue: true));
+            builder.AppendLine(TopStatLine("OBJECTIVES", matchManager, static entry => entry.ObjectiveCaptures));
+            builder.AppendLine(TopStatLine("POWER HITS", matchManager, static entry => entry.PowerUpHits));
+            builder.Append("</mspace>");
+            return builder.ToString();
+        }
+
+        private static string TopStatLine(string label, RetrowaveMatchManager matchManager, Func<RetrowaveLobbyEntry, int> selector, bool compactValue = false)
+        {
+            var bestEntry = default(RetrowaveLobbyEntry);
+            var bestValue = 0;
+            var hasEntry = false;
+
+            for (var i = 0; i < matchManager.LobbyEntries.Count; i++)
+            {
+                var entry = matchManager.LobbyEntries[i];
+
+                if (!entry.HasSelectedRole || (entry.ActiveRole != RetrowaveLobbyRole.Blue && entry.ActiveRole != RetrowaveLobbyRole.Pink))
+                {
+                    continue;
+                }
+
+                var value = selector(entry);
+
+                if (!hasEntry || value > bestValue || (value == bestValue && entry.ClientId < bestEntry.ClientId))
+                {
+                    bestEntry = entry;
+                    bestValue = value;
+                    hasEntry = true;
+                }
+            }
+
+            var name = hasEntry && bestValue > 0 ? FormatScoreboardName(bestEntry.DisplayName.ToString(), 20) : "No leader yet";
+            var valueText = compactValue ? FormatCompactStat(bestValue) : bestValue.ToString();
+            return $"{label.PadRight(10)} {name.PadRight(20)} {valueText.PadLeft(5)}";
+        }
+
+        private static bool TryGetTeamFromEntry(RetrowaveLobbyEntry entry, out RetrowaveTeam team)
+        {
+            if (entry.ActiveRole == RetrowaveLobbyRole.Blue)
+            {
+                team = RetrowaveTeam.Blue;
+                return true;
+            }
+
+            if (entry.ActiveRole == RetrowaveLobbyRole.Pink)
+            {
+                team = RetrowaveTeam.Pink;
+                return true;
+            }
+
+            team = RetrowaveTeam.Blue;
+            return false;
+        }
+
+        private void HideMatchPresentationHud()
+        {
+            if (_gameplayHudLineupRoot != null)
+            {
+                _gameplayHudLineupRoot.SetActive(false);
+            }
+
+            if (_gameplayHudRoundStatsRoot != null)
+            {
+                _gameplayHudRoundStatsRoot.SetActive(false);
+            }
+
+            if (_gameplayHudMvpRoot != null)
+            {
+                _gameplayHudMvpRoot.SetActive(false);
+            }
+        }
+
+        private void ClearMatchPresentationState()
+        {
+            _lineupRoundNumber = 0;
+            _lineupRoundCount = 0;
+            _lineupVisibleUntilRealtime = 0f;
+            _roundStatsRoundNumber = 0;
+            _roundStatsBlueScore = 0;
+            _roundStatsPinkScore = 0;
+            _roundStatsVisibleUntilRealtime = 0f;
+            _mvpClientId = ulong.MaxValue;
+            _mvpScore = 0;
+            _mvpVisibleUntilRealtime = 0f;
+            HideMatchPresentationHud();
+        }
+
+        private static string FormatCompactStat(int value)
+        {
+            if (value >= 10000)
+            {
+                return $"{value / 1000f:0.#}k";
+            }
+
+            if (value >= 1000)
+            {
+                return $"{value / 1000f:0.0}k";
+            }
+
+            return Mathf.Max(0, value).ToString();
         }
 
         private static string BuildFinalScoreSummary(RetrowaveMatchManager matchManager)
@@ -2492,10 +3044,11 @@ namespace RetrowaveRocket
             _hudInfoIntroHideAtRealtime = 0f;
         }
 
-        private static string FormatScoreboardName(string playerLabel)
+        private static string FormatScoreboardName(string playerLabel, int maxLength = 21)
         {
             var trimmed = string.IsNullOrWhiteSpace(playerLabel) ? "Player" : playerLabel.Trim();
-            return trimmed.Length <= 21 ? trimmed : $"{trimmed[..20]}~";
+            var clampedLength = Mathf.Max(4, maxLength);
+            return trimmed.Length <= clampedLength ? trimmed : $"{trimmed[..(clampedLength - 1)]}~";
         }
 
         private GameObject CreateHudPanel(
@@ -2655,6 +3208,51 @@ namespace RetrowaveRocket
                 new Vector2(18f, -58f),
                 new Vector2(356f, 360f),
                 new Color(0.92f, 0.95f, 1f, 0.98f));
+            body.lineSpacing = 8f;
+            body.textWrappingMode = TextWrappingModes.NoWrap;
+            return body;
+        }
+
+        private TMP_Text CreateLineupColumn(Transform parent, string name, Vector2 anchoredPosition, string title, Color titleColor)
+        {
+            var section = CreateHudPanel(
+                parent,
+                name,
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                anchoredPosition,
+                new Vector2(400f, 136f),
+                new Color(0.04f, 0.08f, 0.14f, 0.88f),
+                new Color(titleColor.r, titleColor.g, titleColor.b, 0.24f));
+
+            CreateHudText(
+                section.transform,
+                "Header",
+                title,
+                18f,
+                FontStyles.Bold,
+                TextAlignmentOptions.Center,
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0f, -12f),
+                new Vector2(320f, 28f),
+                titleColor);
+
+            var body = CreateHudText(
+                section.transform,
+                "Body",
+                string.Empty,
+                15f,
+                FontStyles.Bold,
+                TextAlignmentOptions.TopLeft,
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(0f, 1f),
+                new Vector2(22f, -46f),
+                new Vector2(356f, 78f),
+                new Color(0.92f, 0.96f, 1f, 0.98f));
             body.lineSpacing = 8f;
             body.textWrappingMode = TextWrappingModes.NoWrap;
             return body;
@@ -4669,6 +5267,7 @@ namespace RetrowaveRocket
 
             _goalCelebrationVisible = false;
             _goalCelebrationEndsAtRealtime = 0f;
+            _goalCelebrationAssist = string.Empty;
             SetLocalTimeScale(1f);
         }
 

@@ -240,6 +240,7 @@ namespace RetrowaveRocket
                 }
 
                 player.ApplyObjectiveOverchargeServer(duration, cooling);
+                RetrowaveMatchManager.Instance?.RecordObjectiveCaptureServer(player.ControllingClientId);
                 player.AwardStyleServer(RetrowaveStyleEvent.ObjectiveCapture, activeType == RetrowaveArenaObjectiveType.WallGate ? 1.2f : 1f);
             }
 

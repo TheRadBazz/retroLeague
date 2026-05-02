@@ -131,6 +131,7 @@ namespace RetrowaveRocket
                 spinDirection * _spinTorque,
                 _sourceId,
                 _stunImmunitySeconds);
+            RetrowaveMatchManager.Instance?.RecordPowerUpHitServer(_ownerClientId.Value, player.ControllingClientId);
         }
 
         private bool CanAffect(RetrowavePlayerController player)

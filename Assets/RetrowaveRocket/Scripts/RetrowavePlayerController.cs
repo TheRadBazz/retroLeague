@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using TMPro;
 using Unity.Netcode;
 using UnityEngine;
@@ -112,6 +113,10 @@ namespace RetrowaveRocket
         private const float AerialTrickMinAirTime = 0.42f;
         private const float AerialTrickCooldownSeconds = 1.35f;
         private const float FlipTrickSpinThreshold = 5.8f;
+        private const string VehicleVisualRootName = "Body Visual";
+        private const float OwnerVisualSmoothingTime = 0.045f;
+        private const float OwnerVisualRotationBlendRate = 18f;
+        private const float OwnerVisualTeleportDistanceSqr = 9f;
 
         private readonly NetworkVariable<int> _teamValue = new(
             (int)RetrowaveTeam.Blue,
@@ -176,6 +181,13 @@ namespace RetrowaveRocket
         private Rigidbody _rigidbody;
         private Collider[] _colliders;
         private MeshRenderer[] _vehicleRenderers;
+        private Transform _vehicleVisualRoot;
+        private Vector3 _vehicleVisualBaseLocalPosition;
+        private Quaternion _vehicleVisualBaseLocalRotation;
+        private Vector3 _vehicleVisualWorldPosition;
+        private Vector3 _vehicleVisualWorldVelocity;
+        private Quaternion _vehicleVisualWorldRotation;
+        private bool _hasVehicleVisualPose;
         private Light _boostLight;
         private VehicleStatusEffects _statusEffects;
         private RarePowerUpInventory _rarePowerUpInventory;
@@ -260,7 +272,9 @@ namespace RetrowaveRocket
         private void Awake()
         {
             _rigidbody = GetComponent<Rigidbody>();
-            _colliders = GetComponentsInChildren<Collider>(true);
+            _vehicleVisualRoot = transform.Find(VehicleVisualRootName);
+            CacheVehicleVisualPose();
+            _colliders = ResolveGameplayColliders();
             _vehicleRenderers = GetComponentsInChildren<MeshRenderer>(true);
             _boostLight = GetComponentInChildren<Light>(true);
             _statusEffects = GetComponent<VehicleStatusEffects>();
@@ -283,6 +297,58 @@ namespace RetrowaveRocket
             _rigidbody.centerOfMass = new Vector3(0f, -0.38f, 0f);
             _rigidbody.maxAngularVelocity = 16f;
             ApplyTeamVisuals(Team);
+        }
+
+        private void CacheVehicleVisualPose()
+        {
+            if (_vehicleVisualRoot == null)
+            {
+                _vehicleVisualBaseLocalPosition = Vector3.zero;
+                _vehicleVisualBaseLocalRotation = Quaternion.identity;
+                _vehicleVisualWorldPosition = transform.position;
+                _vehicleVisualWorldRotation = transform.rotation;
+                _hasVehicleVisualPose = false;
+                return;
+            }
+
+            _vehicleVisualBaseLocalPosition = _vehicleVisualRoot.localPosition;
+            _vehicleVisualBaseLocalRotation = _vehicleVisualRoot.localRotation;
+            _vehicleVisualWorldPosition = _vehicleVisualRoot.position;
+            _vehicleVisualWorldRotation = _vehicleVisualRoot.rotation;
+            _vehicleVisualWorldVelocity = Vector3.zero;
+            _hasVehicleVisualPose = true;
+        }
+
+        private Collider[] ResolveGameplayColliders()
+        {
+            var allColliders = GetComponentsInChildren<Collider>(true);
+
+            if (_vehicleVisualRoot == null)
+            {
+                return allColliders;
+            }
+
+            var gameplayColliders = new List<Collider>(allColliders.Length);
+
+            for (var i = 0; i < allColliders.Length; i++)
+            {
+                var collider = allColliders[i];
+
+                if (collider == null)
+                {
+                    continue;
+                }
+
+                if (collider.transform == _vehicleVisualRoot || collider.transform.IsChildOf(_vehicleVisualRoot))
+                {
+                    collider.enabled = false;
+                    continue;
+                }
+
+                gameplayColliders.Add(collider);
+            }
+
+            return gameplayColliders.ToArray();
         }
 
         private void Update()
@@ -1438,7 +1504,14 @@ namespace RetrowaveRocket
             }
 
             _styleMeter ??= GetComponent<VehicleStyleMeter>();
-            _styleMeter?.AwardServer(styleEvent, multiplier * RetrowaveUtilityRoleCatalog.GetStyleGainMultiplier(UtilityRole));
+            var points = _styleMeter != null
+                ? _styleMeter.AwardServer(styleEvent, multiplier * RetrowaveUtilityRoleCatalog.GetStyleGainMultiplier(UtilityRole))
+                : 0f;
+
+            if (points > 0f)
+            {
+                RetrowaveMatchManager.Instance?.RecordStyleServer(ControllingClientId, points);
+            }
         }
 
         public void ApplyObjectiveOverchargeServer(float durationSeconds, float coolingAmount)
@@ -1638,7 +1711,57 @@ namespace RetrowaveRocket
 
         private void LateUpdate()
         {
+            UpdateOwnerVehicleVisualPose();
             RefreshNameTag();
+        }
+
+        private void UpdateOwnerVehicleVisualPose()
+        {
+            if (_vehicleVisualRoot == null)
+            {
+                return;
+            }
+
+            var targetPosition = transform.TransformPoint(_vehicleVisualBaseLocalPosition);
+            var targetRotation = transform.rotation * _vehicleVisualBaseLocalRotation;
+            var shouldSmoothLocalPresentation = IsSpawned
+                                                && IsOwner
+                                                && !IsServer
+                                                && IsArenaParticipant
+                                                && !_podiumPresentationHidden.Value;
+
+            if (!shouldSmoothLocalPresentation)
+            {
+                SnapVehicleVisualPose(targetPosition, targetRotation);
+                return;
+            }
+
+            if (!_hasVehicleVisualPose || (targetPosition - _vehicleVisualWorldPosition).sqrMagnitude > OwnerVisualTeleportDistanceSqr)
+            {
+                SnapVehicleVisualPose(targetPosition, targetRotation);
+                return;
+            }
+
+            _vehicleVisualWorldPosition = Vector3.SmoothDamp(
+                _vehicleVisualWorldPosition,
+                targetPosition,
+                ref _vehicleVisualWorldVelocity,
+                OwnerVisualSmoothingTime,
+                float.PositiveInfinity,
+                Time.deltaTime);
+
+            var rotationBlend = 1f - Mathf.Exp(-Time.deltaTime * OwnerVisualRotationBlendRate);
+            _vehicleVisualWorldRotation = Quaternion.Slerp(_vehicleVisualWorldRotation, targetRotation, rotationBlend);
+            _vehicleVisualRoot.SetPositionAndRotation(_vehicleVisualWorldPosition, _vehicleVisualWorldRotation);
+        }
+
+        private void SnapVehicleVisualPose(Vector3 targetPosition, Quaternion targetRotation)
+        {
+            _vehicleVisualWorldPosition = targetPosition;
+            _vehicleVisualWorldVelocity = Vector3.zero;
+            _vehicleVisualWorldRotation = targetRotation;
+            _hasVehicleVisualPose = true;
+            _vehicleVisualRoot.SetLocalPositionAndRotation(_vehicleVisualBaseLocalPosition, _vehicleVisualBaseLocalRotation);
         }
 
         private void SubmitDisplayName()

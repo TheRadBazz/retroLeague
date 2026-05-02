@@ -38,6 +38,7 @@ namespace RetrowaveRocket
         private float _upwardForceMultiplier;
         private LayerMask _vehicleLayerMask;
         private LayerMask _ballLayerMask;
+        private ulong _ownerClientId = ulong.MaxValue;
         private bool _affectBall;
         private float _ballForceMultiplier;
         private float _spawnedAt;
@@ -103,6 +104,7 @@ namespace RetrowaveRocket
 
             _fuseTime.Value = Mathf.Max(0.05f, fuseTime);
             _radius.Value = Mathf.Max(0.5f, radius);
+            _ownerClientId = ownerClientId;
             _maxForce = Mathf.Max(0f, maxForce);
             _upwardForceMultiplier = Mathf.Max(0f, upwardForceMultiplier);
             _vehicleLayerMask = vehicleLayerMask;
@@ -153,6 +155,7 @@ namespace RetrowaveRocket
                     _radius.Value,
                     _maxForce,
                     _upwardForceMultiplier);
+                RetrowaveMatchManager.Instance?.RecordPowerUpHitServer(_ownerClientId, player.ControllingClientId);
             }
 
             AffectedVehicles.Clear();

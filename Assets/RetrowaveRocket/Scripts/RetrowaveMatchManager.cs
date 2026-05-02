@@ -26,6 +26,10 @@ namespace RetrowaveRocket
         public bool IsHost;
         public int Goals;
         public int Assists;
+        public int Saves;
+        public int StyleScore;
+        public int ObjectiveCaptures;
+        public int PowerUpHits;
         public int PingMs;
 
         public RetrowaveLobbyRole Role => (RetrowaveLobbyRole)RoleValue;
@@ -42,6 +46,10 @@ namespace RetrowaveRocket
             serializer.SerializeValue(ref IsHost);
             serializer.SerializeValue(ref Goals);
             serializer.SerializeValue(ref Assists);
+            serializer.SerializeValue(ref Saves);
+            serializer.SerializeValue(ref StyleScore);
+            serializer.SerializeValue(ref ObjectiveCaptures);
+            serializer.SerializeValue(ref PowerUpHits);
             serializer.SerializeValue(ref PingMs);
         }
 
@@ -56,6 +64,10 @@ namespace RetrowaveRocket
                    && IsHost == other.IsHost
                    && Goals == other.Goals
                    && Assists == other.Assists
+                   && Saves == other.Saves
+                   && StyleScore == other.StyleScore
+                   && ObjectiveCaptures == other.ObjectiveCaptures
+                   && PowerUpHits == other.PowerUpHits
                    && PingMs == other.PingMs;
         }
     }
@@ -69,6 +81,9 @@ namespace RetrowaveRocket
         private const float GoalExplosionDistance = 132f;
         private const float KickoffCountdownSeconds = 5f;
         private const float PodiumSequenceSeconds = 24f;
+        private const double SaveAwardCooldownSeconds = 3.25d;
+        private const float SaveDefensiveZoneRatio = 0.56f;
+        private const float SaveGoalwardSpeed = 3.25f;
 
         private readonly NetworkVariable<int> _blueScore = new(
             0,
@@ -146,6 +161,8 @@ namespace RetrowaveRocket
         private ulong _previousTouchClientId = ulong.MaxValue;
         private RetrowaveTeam _previousTouchTeam;
         private double _previousTouchTime;
+        private readonly Dictionary<ulong, double> _lastSaveAwardByClient = new();
+        private readonly Dictionary<ulong, float> _styleTotalsByClient = new();
         private static readonly Vector2[] SpawnClearanceOffsets =
         {
             Vector2.zero,
@@ -353,9 +370,11 @@ namespace RetrowaveRocket
             }
 
             var scorerClientId = ResolveScorerClientId(scoringTeam);
+            var assistClientId = ResolveAssistClientId(scoringTeam, scorerClientId);
             var scorerName = GetScorerAnnouncementName(scorerClientId, scoringTeam);
-            AwardGoalStats(scoringTeam, scorerClientId);
-            StartGoalCelebration(defendedGoal, scoringTeam, scorerName);
+            var assistName = GetAssistAnnouncementName(assistClientId);
+            AwardGoalStats(scorerClientId, assistClientId);
+            StartGoalCelebration(defendedGoal, scoringTeam, scorerName, assistName);
         }
 
         public RetrowaveBallTouchResult RegisterBallTouch(RetrowavePlayerController player)
@@ -372,6 +391,8 @@ namespace RetrowaveRocket
             {
                 return RetrowaveBallTouchResult.Ignored;
             }
+
+            TryAwardSaveServer(player, now);
 
             var isTeamCombo = _lastTouchClientId != ulong.MaxValue
                               && _lastTouchClientId != clientId
@@ -622,6 +643,10 @@ namespace RetrowaveRocket
                 IsHost = clientId == NetworkManager.ServerClientId,
                 Goals = 0,
                 Assists = 0,
+                Saves = 0,
+                StyleScore = 0,
+                ObjectiveCaptures = 0,
+                PowerUpHits = 0,
                 PingMs = 0,
             });
         }
@@ -634,6 +659,9 @@ namespace RetrowaveRocket
             {
                 _lobbyEntries.RemoveAt(index);
             }
+
+            _lastSaveAwardByClient.Remove(clientId);
+            _styleTotalsByClient.Remove(clientId);
         }
 
         private void ApplyRoleForClient(ulong clientId, RetrowaveLobbyRole role)
@@ -671,13 +699,20 @@ namespace RetrowaveRocket
                 var entry = _lobbyEntries[i];
                 entry.Goals = 0;
                 entry.Assists = 0;
+                entry.Saves = 0;
+                entry.StyleScore = 0;
+                entry.ObjectiveCaptures = 0;
+                entry.PowerUpHits = 0;
                 entry.ActiveRoleValue = entry.HasSelectedRole ? entry.RoleValue : (int)RetrowaveLobbyRole.Spectator;
                 entry.QueuedForNextRound = false;
                 _lobbyEntries[i] = entry;
             }
 
+            _lastSaveAwardByClient.Clear();
+            _styleTotalsByClient.Clear();
             ClearTouchHistory();
             BeginKickoffCountdown();
+            ShowPreMatchLineupRpc(_roundNumber.Value, RoundCount, KickoffCountdownSeconds);
         }
 
         private void ClearPowerUpsForMatchStart()
@@ -734,6 +769,7 @@ namespace RetrowaveRocket
         private void AdvanceToNextRound()
         {
             CancelGoalCelebration();
+            ShowRoundStatCardsRpc(_roundNumber.Value, _blueScore.Value, _pinkScore.Value, 5.75f);
 
             if (_roundNumber.Value >= RoundCount)
             {
@@ -778,6 +814,11 @@ namespace RetrowaveRocket
             }
 
             PositionActorsForPodium(hasWinner, winningTeam);
+
+            if (TryResolveMvp(hasWinner, winningTeam, out var mvpEntry, out var mvpScore))
+            {
+                ShowMvpMomentRpc(mvpEntry.ClientId, mvpScore, 9f);
+            }
 
             if (RetrowaveBall.Instance != null)
             {
@@ -972,8 +1013,37 @@ namespace RetrowaveRocket
             return entries;
         }
 
+        private bool TryResolveMvp(bool hasWinner, RetrowaveTeam winningTeam, out RetrowaveLobbyEntry mvpEntry, out int mvpScore)
+        {
+            var entries = BuildPodiumEntries(hasWinner, winningTeam);
+
+            if (entries.Count == 0 && hasWinner)
+            {
+                entries = BuildPodiumEntries(hasWinner: false, RetrowaveTeam.Blue);
+            }
+
+            if (entries.Count == 0)
+            {
+                mvpEntry = default;
+                mvpScore = 0;
+                return false;
+            }
+
+            entries.Sort(ComparePodiumEntries);
+            mvpEntry = entries[0];
+            mvpScore = CalculateMvpScore(mvpEntry);
+            return true;
+        }
+
         private static int ComparePodiumEntries(RetrowaveLobbyEntry left, RetrowaveLobbyEntry right)
         {
+            var mvpCompare = CalculateMvpScore(right).CompareTo(CalculateMvpScore(left));
+
+            if (mvpCompare != 0)
+            {
+                return mvpCompare;
+            }
+
             var goalCompare = right.Goals.CompareTo(left.Goals);
 
             if (goalCompare != 0)
@@ -991,12 +1061,22 @@ namespace RetrowaveRocket
             return left.ClientId.CompareTo(right.ClientId);
         }
 
-        private void StartGoalCelebration(RetrowaveTeam defendedGoal, RetrowaveTeam scoringTeam, string scorerName)
+        private static int CalculateMvpScore(RetrowaveLobbyEntry entry)
+        {
+            return entry.Goals * 100
+                   + entry.Assists * 60
+                   + entry.Saves * 70
+                   + entry.ObjectiveCaptures * 45
+                   + entry.PowerUpHits * 35
+                   + entry.StyleScore;
+        }
+
+        private void StartGoalCelebration(RetrowaveTeam defendedGoal, RetrowaveTeam scoringTeam, string scorerName, string assistName)
         {
             _goalCelebrationActive.Value = true;
             _goalCelebrationTimer = GoalCelebrationDuration;
             ResetActorsForKickoff();
-            BeginGoalCelebrationRpc((int)scoringTeam, scorerName, _blueScore.Value, _pinkScore.Value, GoalCelebrationDuration);
+            BeginGoalCelebrationRpc((int)scoringTeam, scorerName, assistName, _blueScore.Value, _pinkScore.Value, GoalCelebrationDuration);
         }
 
         private void FinishGoalCelebration()
@@ -1133,21 +1213,16 @@ namespace RetrowaveRocket
             }
         }
 
-        private void AwardGoalStats(RetrowaveTeam scoringTeam, ulong scorerClientId)
+        private void AwardGoalStats(ulong scorerClientId, ulong assistClientId)
         {
             if (scorerClientId != ulong.MaxValue)
             {
                 IncrementGoals(scorerClientId);
             }
 
-            var assistIsValid = _previousTouchClientId != ulong.MaxValue
-                                && _previousTouchClientId != scorerClientId
-                                && _previousTouchTeam == scoringTeam
-                                && _lastTouchTime - _previousTouchTime <= 8d;
-
-            if (assistIsValid)
+            if (assistClientId != ulong.MaxValue)
             {
-                IncrementAssists(_previousTouchClientId);
+                IncrementAssists(assistClientId);
             }
 
             ClearTouchHistory();
@@ -1160,6 +1235,16 @@ namespace RetrowaveRocket
                 : ulong.MaxValue;
         }
 
+        private ulong ResolveAssistClientId(RetrowaveTeam scoringTeam, ulong scorerClientId)
+        {
+            var assistIsValid = _previousTouchClientId != ulong.MaxValue
+                                && _previousTouchClientId != scorerClientId
+                                && _previousTouchTeam == scoringTeam
+                                && _lastTouchTime - _previousTouchTime <= 8d;
+
+            return assistIsValid ? _previousTouchClientId : ulong.MaxValue;
+        }
+
         private string GetScorerAnnouncementName(ulong scorerClientId, RetrowaveTeam scoringTeam)
         {
             if (scorerClientId != ulong.MaxValue && TryGetLobbyEntry(scorerClientId, out var scorerEntry))
@@ -1168,6 +1253,13 @@ namespace RetrowaveRocket
             }
 
             return scoringTeam == RetrowaveTeam.Blue ? "Blue Team" : "Pink Team";
+        }
+
+        private string GetAssistAnnouncementName(ulong assistClientId)
+        {
+            return assistClientId != ulong.MaxValue && TryGetLobbyEntry(assistClientId, out var assistEntry)
+                ? assistEntry.DisplayName.ToString()
+                : string.Empty;
         }
 
         private void BlastActorsFromGoal(RetrowaveTeam defendedGoal)
@@ -1210,15 +1302,34 @@ namespace RetrowaveRocket
         }
 
         [Rpc(SendTo.ClientsAndHost)]
-        private void BeginGoalCelebrationRpc(int scoringTeamValue, string scorerName, int blueScore, int pinkScore, float durationSeconds)
+        private void BeginGoalCelebrationRpc(int scoringTeamValue, string scorerName, string assistName, int blueScore, int pinkScore, float durationSeconds)
         {
             RetrowaveArenaAudio.PlayGoalCelebration(Vector3.zero);
             RetrowaveGameBootstrap.Instance?.BeginGoalCelebration(
                 (RetrowaveTeam)scoringTeamValue,
                 scorerName,
+                assistName,
                 blueScore,
                 pinkScore,
                 durationSeconds);
+        }
+
+        [Rpc(SendTo.ClientsAndHost)]
+        private void ShowPreMatchLineupRpc(int roundNumber, int roundCount, float durationSeconds)
+        {
+            RetrowaveGameBootstrap.Instance?.ShowPreMatchLineup(roundNumber, roundCount, durationSeconds);
+        }
+
+        [Rpc(SendTo.ClientsAndHost)]
+        private void ShowRoundStatCardsRpc(int completedRound, int blueScore, int pinkScore, float durationSeconds)
+        {
+            RetrowaveGameBootstrap.Instance?.ShowRoundStatCards(completedRound, blueScore, pinkScore, durationSeconds);
+        }
+
+        [Rpc(SendTo.ClientsAndHost)]
+        private void ShowMvpMomentRpc(ulong mvpClientId, int mvpScore, float durationSeconds)
+        {
+            RetrowaveGameBootstrap.Instance?.ShowMvpMoment(mvpClientId, mvpScore, durationSeconds);
         }
 
         private void IncrementGoals(ulong clientId)
@@ -1247,6 +1358,121 @@ namespace RetrowaveRocket
             var entry = _lobbyEntries[index];
             entry.Assists++;
             _lobbyEntries[index] = entry;
+        }
+
+        public void RecordStyleServer(ulong clientId, float points)
+        {
+            if (!IsServer || clientId == ulong.MaxValue || points <= 0f)
+            {
+                return;
+            }
+
+            var index = GetLobbyEntryIndex(clientId);
+
+            if (index < 0)
+            {
+                return;
+            }
+
+            _styleTotalsByClient.TryGetValue(clientId, out var currentTotal);
+            currentTotal += points;
+            _styleTotalsByClient[clientId] = currentTotal;
+
+            var entry = _lobbyEntries[index];
+            var nextScore = Mathf.FloorToInt(currentTotal);
+
+            if (entry.StyleScore != nextScore)
+            {
+                entry.StyleScore = nextScore;
+                _lobbyEntries[index] = entry;
+            }
+        }
+
+        public void RecordObjectiveCaptureServer(ulong clientId)
+        {
+            if (!IsServer || clientId == ulong.MaxValue)
+            {
+                return;
+            }
+
+            var index = GetLobbyEntryIndex(clientId);
+
+            if (index < 0)
+            {
+                return;
+            }
+
+            var entry = _lobbyEntries[index];
+            entry.ObjectiveCaptures++;
+            _lobbyEntries[index] = entry;
+        }
+
+        public void RecordPowerUpHitServer(ulong sourceClientId, ulong targetClientId = ulong.MaxValue)
+        {
+            if (!IsServer || sourceClientId == ulong.MaxValue || sourceClientId == targetClientId)
+            {
+                return;
+            }
+
+            var index = GetLobbyEntryIndex(sourceClientId);
+
+            if (index < 0)
+            {
+                return;
+            }
+
+            var entry = _lobbyEntries[index];
+            entry.PowerUpHits++;
+            _lobbyEntries[index] = entry;
+        }
+
+        private void IncrementSaves(ulong clientId)
+        {
+            var index = GetLobbyEntryIndex(clientId);
+
+            if (index < 0)
+            {
+                return;
+            }
+
+            var entry = _lobbyEntries[index];
+            entry.Saves++;
+            _lobbyEntries[index] = entry;
+        }
+
+        private void TryAwardSaveServer(RetrowavePlayerController player, double now)
+        {
+            if (!IsLiveMatch || player == null || !player.IsArenaParticipant || RetrowaveBall.Instance == null || RetrowaveBall.Instance.Body == null)
+            {
+                return;
+            }
+
+            var ballBody = RetrowaveBall.Instance.Body;
+            var ballPosition = ballBody.worldCenterOfMass;
+            var ballVelocity = ballBody.linearVelocity;
+            var defendingBlueGoal = player.Team == RetrowaveTeam.Blue;
+            var defensiveZone = defendingBlueGoal
+                ? ballPosition.z <= -RetrowaveArenaConfig.FlatHalfLength * SaveDefensiveZoneRatio
+                : ballPosition.z >= RetrowaveArenaConfig.FlatHalfLength * SaveDefensiveZoneRatio;
+            var goalwardSpeed = defendingBlueGoal ? -ballVelocity.z : ballVelocity.z;
+            var inGoalLane = Mathf.Abs(ballPosition.x) <= RetrowaveArenaConfig.GoalHalfWidth + 5f;
+
+            if (!defensiveZone || !inGoalLane || goalwardSpeed < SaveGoalwardSpeed)
+            {
+                return;
+            }
+
+            var clientId = player.ControllingClientId;
+
+            if (_lastSaveAwardByClient.TryGetValue(clientId, out var lastAwardTime)
+                && now - lastAwardTime < SaveAwardCooldownSeconds)
+            {
+                return;
+            }
+
+            _lastSaveAwardByClient[clientId] = now;
+            IncrementSaves(clientId);
+            player.AwardStyleServer(RetrowaveStyleEvent.PowerPlay, 0.65f);
         }
 
         private void AwardStyleToPlayerServer(ulong clientId, RetrowaveStyleEvent styleEvent)

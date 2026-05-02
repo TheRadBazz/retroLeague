@@ -1,6 +1,7 @@
 #pragma warning disable 0649
 
 using System.Collections;
+using System.Collections.Generic;
 using Unity.Netcode;
 using UnityEngine;
 
@@ -11,6 +12,7 @@ namespace RetrowaveRocket
     {
         private const int MaxFieldHits = 96;
         private static readonly Collider[] FieldHits = new Collider[MaxFieldHits];
+        private readonly HashSet<ulong> _recordedHits = new();
 
         private readonly NetworkVariable<float> _radius = new(
             10f,
@@ -115,6 +117,7 @@ namespace RetrowaveRocket
             _tickInterval = 1f / Mathf.Max(1f, tickRate);
             _nextTickAt = Time.time;
             _sourceId = ((ulong)ownerClientId << 32) ^ (ulong)NetworkObjectId;
+            _recordedHits.Clear();
             RefreshRadius();
             StartCoroutine(ExpireRoutine(_duration.Value));
         }
@@ -144,6 +147,11 @@ namespace RetrowaveRocket
                         _movementMultiplier,
                         _steeringMultiplier,
                         _sourceId);
+
+                    if (_recordedHits.Add(player.ControllingClientId))
+                    {
+                        RetrowaveMatchManager.Instance?.RecordPowerUpHitServer(_ownerClientId, player.ControllingClientId);
+                    }
                 }
             }
 

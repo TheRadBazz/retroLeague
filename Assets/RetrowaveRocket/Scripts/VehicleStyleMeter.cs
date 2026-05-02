@@ -51,18 +51,18 @@ namespace RetrowaveRocket
             _style.Value = Mathf.Max(0f, _style.Value - _decayPerSecond * Time.fixedDeltaTime);
         }
 
-        public void AwardServer(RetrowaveStyleEvent styleEvent, float multiplier = 1f)
+        public float AwardServer(RetrowaveStyleEvent styleEvent, float multiplier = 1f)
         {
             if (!IsServer)
             {
-                return;
+                return 0f;
             }
 
             var points = GetBaseAward(styleEvent) * Mathf.Max(0f, multiplier);
 
             if (points <= 0f)
             {
-                return;
+                return 0f;
             }
 
             _style.Value = Mathf.Clamp(_style.Value + points, 0f, MaxStyle);
@@ -73,6 +73,8 @@ namespace RetrowaveRocket
                 _lastAwardPoints.Value = points;
                 _lastAwardSerial.Value++;
             }
+
+            return points;
         }
 
         public void ClearServer()

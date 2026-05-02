@@ -37,7 +37,11 @@ namespace RetrowaveRocket
         private FollowMode _followMode;
         private Vector3 _velocity;
         private Vector3 _lastTargetPosition;
+        private Vector3 _smoothedTargetPosition;
+        private Vector3 _targetPositionVelocity;
         private Vector3 _estimatedVelocity;
+        private Vector3 _smoothedBodyVelocity;
+        private bool _hasSmoothedTargetPosition;
         private float _orbitYaw;
         private float _orbitPitch = DefaultOrbitPitch;
         private float _currentOrbitDistance = OrbitDistance;
@@ -139,6 +143,9 @@ namespace RetrowaveRocket
             _instance._followMode = FollowMode.Podium;
             _instance._velocity = Vector3.zero;
             _instance._estimatedVelocity = Vector3.zero;
+            _instance._smoothedBodyVelocity = Vector3.zero;
+            _instance._targetPositionVelocity = Vector3.zero;
+            _instance._hasSmoothedTargetPosition = false;
             _instance.ApplyViewSettings();
             _instance.UpdatePodiumView(instant: true);
             _instance.UpdateCursorState(false);
@@ -149,7 +156,11 @@ namespace RetrowaveRocket
             _target = target;
             _followMode = followMode;
             _lastTargetPosition = target.transform.position;
+            _smoothedTargetPosition = _lastTargetPosition;
             _estimatedVelocity = Vector3.zero;
+            _smoothedBodyVelocity = Vector3.zero;
+            _targetPositionVelocity = Vector3.zero;
+            _hasSmoothedTargetPosition = true;
             _orbitYaw = 0f;
             _orbitPitch = DefaultOrbitPitch;
             _currentOrbitDistance = OrbitDistance;
@@ -163,6 +174,9 @@ namespace RetrowaveRocket
             _instance._followMode = FollowMode.Overview;
             _instance._velocity = Vector3.zero;
             _instance._estimatedVelocity = Vector3.zero;
+            _instance._smoothedBodyVelocity = Vector3.zero;
+            _instance._targetPositionVelocity = Vector3.zero;
+            _instance._hasSmoothedTargetPosition = false;
             _instance.ApplyViewSettings();
             var overviewPosition = ResolveOverviewPosition();
             var overviewLookPoint = ResolveOverviewLookPoint();
@@ -207,14 +221,19 @@ namespace RetrowaveRocket
             }
 
             var targetTransform = _target.transform;
-            var frameVelocity = (targetTransform.position - _lastTargetPosition) / Mathf.Max(Time.deltaTime, 0.0001f);
+            var targetPosition = ResolveTargetPosition(targetTransform);
+            var frameVelocity = (targetPosition - _lastTargetPosition) / Mathf.Max(Time.deltaTime, 0.0001f);
             _estimatedVelocity = Vector3.Lerp(_estimatedVelocity, frameVelocity, Time.deltaTime * 10f);
-            _lastTargetPosition = targetTransform.position;
+            _lastTargetPosition = targetPosition;
 
             var currentVelocity = _target.CurrentVelocity;
-            var bodyVelocity = currentVelocity.sqrMagnitude > 0.1f
+            var targetBodyVelocity = currentVelocity.sqrMagnitude > 0.1f
                 ? currentVelocity
                 : _estimatedVelocity;
+            var bodyVelocityBlendRate = _target.IsOwner && !_target.IsServer ? 5f : 9f;
+            var bodyVelocityBlend = 1f - Mathf.Exp(-Time.deltaTime * bodyVelocityBlendRate);
+            _smoothedBodyVelocity = Vector3.Lerp(_smoothedBodyVelocity, targetBodyVelocity, bodyVelocityBlend);
+            var bodyVelocity = _smoothedBodyVelocity;
             var blendedUp = Vector3.Slerp(Vector3.up, targetTransform.up, 0.35f);
             var baseRotation = Quaternion.LookRotation(targetTransform.forward, blendedUp);
             UpdateOrbit(targetTransform, blendedUp, bodyVelocity);
@@ -224,7 +243,7 @@ namespace RetrowaveRocket
             var pitchAxis = orbitBasis * Vector3.right;
             var orbitRotation = Quaternion.AngleAxis(_orbitPitch, pitchAxis) * orbitBasis;
             var orbitForward = orbitRotation * Vector3.forward;
-            var focusPoint = targetTransform.position
+            var focusPoint = targetPosition
                              + blendedUp * OrbitHeight
                              + bodyVelocity * 0.15f;
             var requestedDistance = OrbitDistance + Mathf.Clamp(bodyVelocity.magnitude * 0.04f, 0f, 1.8f);
@@ -239,7 +258,7 @@ namespace RetrowaveRocket
 
             transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref _velocity, 0.1f);
 
-            var lookPoint = targetTransform.position
+            var lookPoint = targetPosition
                             + orbitForward * 4.5f
                             + blendedUp * 1.15f
                             + bodyVelocity * 0.08f;
@@ -250,6 +269,36 @@ namespace RetrowaveRocket
 
             var targetFov = BaseFieldOfView + Mathf.Clamp(bodyVelocity.magnitude * 0.8f, 0f, 18f);
             _camera.fieldOfView = Mathf.Lerp(_camera.fieldOfView, targetFov, Time.deltaTime * 5f);
+        }
+
+        private Vector3 ResolveTargetPosition(Transform targetTransform)
+        {
+            var rawPosition = targetTransform.position;
+
+            if (!_hasSmoothedTargetPosition || (rawPosition - _smoothedTargetPosition).sqrMagnitude > 64f)
+            {
+                _smoothedTargetPosition = rawPosition;
+                _targetPositionVelocity = Vector3.zero;
+                _hasSmoothedTargetPosition = true;
+                return rawPosition;
+            }
+
+            if (_target == null || !_target.IsOwner || _target.IsServer)
+            {
+                _smoothedTargetPosition = rawPosition;
+                _targetPositionVelocity = Vector3.zero;
+                return rawPosition;
+            }
+
+            _smoothedTargetPosition = Vector3.SmoothDamp(
+                _smoothedTargetPosition,
+                rawPosition,
+                ref _targetPositionVelocity,
+                0.055f,
+                float.PositiveInfinity,
+                Time.deltaTime);
+
+            return _smoothedTargetPosition;
         }
 
         private void UpdatePodiumView(bool instant)
