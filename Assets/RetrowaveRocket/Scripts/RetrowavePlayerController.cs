@@ -101,6 +101,12 @@ namespace RetrowaveRocket
         private const float MaxBoostSpeed = 38f;
         private const float GroundedGraceSeconds = 0.14f;
         private const float BoostStartThreshold = 0.6f;
+        private const float ClientSpeedSmoothTime = 0.14f;
+        private const float ClientSpeedMaxChangeRate = 90f;
+        private const float ClientVelocityProbeBlendRate = 6.5f;
+        private const float ClientVelocityDisplayBlendRate = 10f;
+        private const float ObservedVelocityTeleportDistanceSqr = 256f;
+        private const float ObservedVelocityMinDisplacementSqr = 0.0004f;
         private const float CleanLandingMinAirTime = 0.65f;
         private const float CleanLandingMinAlignment = 0.72f;
         private const float AerialTrickMinAirTime = 0.42f;
@@ -134,6 +140,11 @@ namespace RetrowaveRocket
 
         private readonly NetworkVariable<bool> _boostFx = new(
             false,
+            NetworkVariableReadPermission.Everyone,
+            NetworkVariableWritePermission.Server);
+
+        private readonly NetworkVariable<float> _replicatedSpeed = new(
+            0f,
             NetworkVariableReadPermission.Everyone,
             NetworkVariableWritePermission.Server);
 
@@ -204,6 +215,14 @@ namespace RetrowaveRocket
         private float _styleMinVerticalVelocity;
         private float _lastAerialManeuverStyleAt;
         private float _lastFlipStyleAt;
+        private Vector3 _observedVelocity;
+        private Vector3 _smoothedVelocity;
+        private Vector3 _lastObservedPosition;
+        private float _smoothedSpeed;
+        private float _speedSmoothVelocity;
+        private bool _hasObservedPosition;
+        private bool _serverJumpQueued;
+        private bool _serverResetQueued;
 
         public static RetrowavePlayerController LocalOwner { get; private set; }
         public static RetrowavePlayerController LocalPlayer { get; private set; }
@@ -215,7 +234,8 @@ namespace RetrowaveRocket
         public float BoostNormalized => Mathf.Clamp01(_boostAmount.Value / RetrowaveArenaConfig.MaxBoost);
         public float BoostAmount => Mathf.Clamp(_boostAmount.Value, 0f, RetrowaveArenaConfig.MaxBoost);
         public bool HasSpeedBoost => _speedBoostTimer.Value > 0.05f;
-        public float CurrentSpeed => _rigidbody != null ? _rigidbody.linearVelocity.magnitude : 0f;
+        public Vector3 CurrentVelocity => ResolveCurrentVelocity();
+        public float CurrentSpeed => ResolveCurrentSpeed();
         public float MaxHudSpeed => MaxBoostSpeed * RetrowaveArenaConfig.SpeedBurstMultiplier;
         public float SpeedNormalized => Mathf.Clamp01(CurrentSpeed / Mathf.Max(0.01f, MaxHudSpeed));
         public bool IsGroundedForHud => _isGrounded;
@@ -277,6 +297,7 @@ namespace RetrowaveRocket
                 CacheLocalInput();
             }
 
+            UpdateObservedMotion();
             RefreshPresentationState();
             UpdateBoostVisuals();
         }
@@ -293,6 +314,7 @@ namespace RetrowaveRocket
                 if (IsServer)
                 {
                     _boostFx.Value = false;
+                    SetReplicatedSpeedServer(0f);
                 }
 
                 return;
@@ -318,7 +340,20 @@ namespace RetrowaveRocket
                 }
                 else
                 {
-                    SubmitInputServerRpc(outbound);
+                    var continuousInput = outbound;
+                    continuousInput.JumpPressed = false;
+                    continuousInput.ResetPressed = false;
+                    SubmitInputServerRpc(continuousInput);
+
+                    if (outbound.JumpPressed)
+                    {
+                        SubmitJumpPressedServerRpc();
+                    }
+
+                    if (outbound.ResetPressed)
+                    {
+                        SubmitResetPressedServerRpc();
+                    }
                 }
 
                 _jumpQueued = false;
@@ -338,11 +373,27 @@ namespace RetrowaveRocket
                 _rigidbody.linearVelocity = Vector3.zero;
                 _rigidbody.angularVelocity = Vector3.zero;
                 _boostFx.Value = false;
+                SetReplicatedSpeedServer(0f);
                 SetEngineAudioStateServer(0f, false);
                 return;
             }
 
-            SimulateMovement(_latestInput);
+            var simulationInput = _latestInput;
+
+            if (_serverJumpQueued)
+            {
+                simulationInput.JumpPressed = true;
+                _serverJumpQueued = false;
+            }
+
+            if (_serverResetQueued)
+            {
+                simulationInput.ResetPressed = true;
+                _serverResetQueued = false;
+            }
+
+            SimulateMovement(simulationInput);
+            PublishServerMotionState();
         }
 
         public override void OnNetworkSpawn()
@@ -360,6 +411,7 @@ namespace RetrowaveRocket
                 _rigidbody.useGravity = false;
             }
 
+            ResetObservedMotion();
             ApplyTeamVisuals(Team);
             RefreshPresentationState();
 
@@ -394,13 +446,145 @@ namespace RetrowaveRocket
                 LocalPlayer = null;
             }
 
+            _observedVelocity = Vector3.zero;
+            _smoothedVelocity = Vector3.zero;
+            _smoothedSpeed = 0f;
+            _speedSmoothVelocity = 0f;
+            _hasObservedPosition = false;
+
             base.OnNetworkDespawn();
         }
 
-        [ServerRpc]
+        private Vector3 ResolveCurrentVelocity()
+        {
+            if (_rigidbody == null)
+            {
+                return _smoothedVelocity;
+            }
+
+            if (IsServer || !_rigidbody.isKinematic || _rigidbody.linearVelocity.sqrMagnitude > 0.01f)
+            {
+                return _rigidbody.linearVelocity;
+            }
+
+            if (_smoothedVelocity.sqrMagnitude > 0.01f)
+            {
+                return _smoothedVelocity;
+            }
+
+            return transform.forward * ResolveCurrentSpeed();
+        }
+
+        private float ResolveCurrentSpeed()
+        {
+            if (_rigidbody == null)
+            {
+                return _smoothedSpeed;
+            }
+
+            if (IsServer || !_rigidbody.isKinematic || _rigidbody.linearVelocity.sqrMagnitude > 0.01f)
+            {
+                return _rigidbody.linearVelocity.magnitude;
+            }
+
+            return _smoothedSpeed;
+        }
+
+        private void UpdateObservedMotion()
+        {
+            var currentPosition = transform.position;
+
+            if (!_hasObservedPosition)
+            {
+                _lastObservedPosition = currentPosition;
+                _observedVelocity = _rigidbody != null ? _rigidbody.linearVelocity : Vector3.zero;
+                _smoothedVelocity = _observedVelocity;
+                _smoothedSpeed = _observedVelocity.magnitude;
+                _hasObservedPosition = true;
+                return;
+            }
+
+            var deltaTime = Mathf.Max(Time.deltaTime, 0.0001f);
+            var displacement = currentPosition - _lastObservedPosition;
+            _lastObservedPosition = currentPosition;
+
+            if (displacement.sqrMagnitude > ObservedVelocityTeleportDistanceSqr)
+            {
+                _observedVelocity = Vector3.zero;
+                _smoothedVelocity = Vector3.zero;
+                _smoothedSpeed = 0f;
+                _speedSmoothVelocity = 0f;
+                return;
+            }
+
+            if (IsServer && _rigidbody != null)
+            {
+                _observedVelocity = _rigidbody.linearVelocity;
+                _smoothedVelocity = _observedVelocity;
+                _smoothedSpeed = _observedVelocity.magnitude;
+                return;
+            }
+
+            if (displacement.sqrMagnitude > ObservedVelocityMinDisplacementSqr)
+            {
+                var rawVelocity = displacement / deltaTime;
+                var probeBlend = 1f - Mathf.Exp(-deltaTime * ClientVelocityProbeBlendRate);
+                _observedVelocity = Vector3.Lerp(_observedVelocity, rawVelocity, probeBlend);
+            }
+
+            var targetSpeed = Mathf.Max(0f, _replicatedSpeed.Value);
+            _smoothedSpeed = Mathf.SmoothDamp(
+                _smoothedSpeed,
+                targetSpeed,
+                ref _speedSmoothVelocity,
+                ClientSpeedSmoothTime,
+                ClientSpeedMaxChangeRate,
+                deltaTime);
+
+            if (_smoothedSpeed < 0.04f && targetSpeed < 0.04f)
+            {
+                _smoothedSpeed = 0f;
+                _speedSmoothVelocity = 0f;
+            }
+
+            var direction = _observedVelocity.sqrMagnitude > 0.25f
+                ? _observedVelocity.normalized
+                : _smoothedVelocity.sqrMagnitude > 0.25f
+                    ? _smoothedVelocity.normalized
+                    : transform.forward;
+            var targetVelocity = direction * _smoothedSpeed;
+            var displayBlend = 1f - Mathf.Exp(-deltaTime * ClientVelocityDisplayBlendRate);
+            _smoothedVelocity = Vector3.Lerp(_smoothedVelocity, targetVelocity, displayBlend);
+        }
+
+        private void ResetObservedMotion()
+        {
+            _lastObservedPosition = transform.position;
+            _observedVelocity = Vector3.zero;
+            _smoothedVelocity = Vector3.zero;
+            _smoothedSpeed = 0f;
+            _speedSmoothVelocity = 0f;
+            _hasObservedPosition = true;
+        }
+
+        [ServerRpc(Delivery = RpcDelivery.Unreliable)]
         private void SubmitInputServerRpc(RetrowavePlayerInputState input)
         {
+            input.JumpPressed = false;
+            input.ResetPressed = false;
             _latestInput = input;
+        }
+
+        [ServerRpc]
+        private void SubmitJumpPressedServerRpc()
+        {
+            _serverJumpQueued = true;
+        }
+
+        [ServerRpc]
+        private void SubmitResetPressedServerRpc()
+        {
+            _serverResetQueued = true;
         }
 
         [ServerRpc]
@@ -477,6 +661,9 @@ namespace RetrowaveRocket
             _boostRequiresRelease = false;
             _glideRequiresRelease = false;
             _boostRechargeDelayTimer = 0f;
+            _serverJumpQueued = false;
+            _serverResetQueued = false;
+            SetReplicatedSpeedServer(0f);
             ResetAerialStyleTracking();
             SetEngineAudioStateServer(0f, false);
             _statusEffects?.ClearServer();
@@ -504,6 +691,9 @@ namespace RetrowaveRocket
             _boostRequiresRelease = false;
             _glideRequiresRelease = false;
             _boostRechargeDelayTimer = 0f;
+            _serverJumpQueued = false;
+            _serverResetQueued = false;
+            SetReplicatedSpeedServer(0f);
             ResetAerialStyleTracking();
             SetEngineAudioStateServer(0f, false);
             _statusEffects?.ClearServer();
@@ -538,6 +728,9 @@ namespace RetrowaveRocket
             _boostRequiresRelease = false;
             _glideRequiresRelease = false;
             _boostRechargeDelayTimer = 0f;
+            _serverJumpQueued = false;
+            _serverResetQueued = false;
+            SetReplicatedSpeedServer(0f);
             ResetAerialStyleTracking();
             SetEngineAudioStateServer(0f, false);
             _statusEffects?.ClearServer();
@@ -607,6 +800,9 @@ namespace RetrowaveRocket
             _boostFx.Value = false;
             _boostRequiresRelease = false;
             _glideRequiresRelease = false;
+            _serverJumpQueued = false;
+            _serverResetQueued = false;
+            SetReplicatedSpeedServer(0f);
             ResetAerialStyleTracking();
             SetEngineAudioStateServer(0f, false);
             _statusEffects?.ClearServer();
@@ -1265,6 +1461,31 @@ namespace RetrowaveRocket
 
             _engineAudioThrottle.Value = Mathf.Clamp(throttle, -1f, 1f);
             _engineAudioBoosting.Value = isBoosting;
+        }
+
+        private void PublishServerMotionState()
+        {
+            if (!IsServer || _rigidbody == null)
+            {
+                return;
+            }
+
+            SetReplicatedSpeedServer(_rigidbody.linearVelocity.magnitude);
+        }
+
+        private void SetReplicatedSpeedServer(float speed)
+        {
+            if (!IsServer)
+            {
+                return;
+            }
+
+            var clampedSpeed = Mathf.Clamp(speed, 0f, MaxHudSpeed);
+
+            if (Mathf.Abs(_replicatedSpeed.Value - clampedSpeed) > 0.04f || clampedSpeed < 0.04f)
+            {
+                _replicatedSpeed.Value = clampedSpeed;
+            }
         }
 
         private void HandleTeamChanged(int _, int nextValue)

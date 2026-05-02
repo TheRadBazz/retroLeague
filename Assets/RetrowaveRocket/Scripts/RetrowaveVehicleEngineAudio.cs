@@ -58,7 +58,6 @@ namespace RetrowaveRocket
         [SerializeField] private AudioClip _veryHighOffClip;
 
         private RetrowavePlayerController _player;
-        private Rigidbody _body;
         private AudioSource _idleSource;
         private AudioSource _maxRpmSource;
         private AudioSource _oneShotSource;
@@ -75,7 +74,6 @@ namespace RetrowaveRocket
         private void Awake()
         {
             _player = GetComponent<RetrowavePlayerController>();
-            _body = GetComponent<Rigidbody>();
             LoadDefaultClips();
             BuildClipArrays();
             BuildAudioSources();
@@ -140,6 +138,13 @@ namespace RetrowaveRocket
 
         private static void LoadClip(ref AudioClip clip, string clipName)
         {
+            if (clip != null)
+            {
+                return;
+            }
+
+            clip = RetrowaveAudioLibrary.Resolve(clipName);
+
             if (clip != null)
             {
                 return;
@@ -271,7 +276,7 @@ namespace RetrowaveRocket
             _rpm = Mathf.MoveTowards(_rpm, targetRpm, rpmRate * Time.deltaTime);
             _load = Mathf.MoveTowards(_load, targetLoad, loadRate * Time.deltaTime);
 
-            if (_body != null && _body.linearVelocity.sqrMagnitude < 0.12f && targetLoad < 0.05f)
+            if (_player.CurrentSpeed < 0.35f && targetLoad < 0.05f)
             {
                 _rpm = Mathf.MoveTowards(_rpm, 0.05f, _rpmFallSpeed * Time.deltaTime);
             }

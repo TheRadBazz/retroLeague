@@ -1,0 +1,71 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c30f0cc2b9874cc69dfb2ae1cf949557, type: 3}
+  m_Name: RetrowaveAudioLibrary
+  m_EditorClassIdentifier: 
+  Clips:
+  - Key: startup
+    Clip: {fileID: 8300000, guid: da764d82c6173db4d9069c3cbfd2ffcb, type: 3}
+  - Key: engine_stop
+    Clip: {fileID: 8300000, guid: 0e49d7290716e8d4e9a3c8a864967830, type: 3}
+  - Key: idle
+    Clip: {fileID: 8300000, guid: c7ad6664787760a40bc80e24367e2dec, type: 3}
+  - Key: maxRPM
+    Clip: {fileID: 8300000, guid: 4c03884bf86e76c448e3a0a4918d0b0e, type: 3}
+  - Key: aggressiveness_off_fx
+    Clip: {fileID: 8300000, guid: 0cc1d595a17a2464ea334bbfd5192567, type: 3}
+  - Key: idle_low_on
+    Clip: {fileID: 8300000, guid: cc2613e2324d92f419e6959ac2621f10, type: 3}
+  - Key: low_on
+    Clip: {fileID: 8300000, guid: 42dab2e0a9ebbd54880d2a5cc44fb6d0, type: 3}
+  - Key: low_med_on
+    Clip: {fileID: 8300000, guid: 929ab1a14e5de5441a33210c3daafcb9, type: 3}
+  - Key: med_on
+    Clip: {fileID: 8300000, guid: 44172f12a3012454aa65536df36452ae, type: 3}
+  - Key: med_high_on
+    Clip: {fileID: 8300000, guid: b0e9cde95b999494ea8a482e79b54286, type: 3}
+  - Key: high_on
+    Clip: {fileID: 8300000, guid: 95cd681ff458804409e21e9eb590eb44, type: 3}
+  - Key: very_high_on
+    Clip: {fileID: 8300000, guid: d65bb86ffadb0e34cac873411320cf3e, type: 3}
+  - Key: idle_low_off
+    Clip: {fileID: 8300000, guid: ba69d12f28d04434e908432da4e083b1, type: 3}
+  - Key: low_off
+    Clip: {fileID: 8300000, guid: bac4a4385c1a35543b658c1e094367d4, type: 3}
+  - Key: low_med_off
+    Clip: {fileID: 8300000, guid: 3ccf4794c94a5e54ba58982dc72c9bd5, type: 3}
+  - Key: med_off
+    Clip: {fileID: 8300000, guid: df95377110e206f44a9892d0c9e178ed, type: 3}
+  - Key: med_high_off
+    Clip: {fileID: 8300000, guid: 31b4d2af3fd38a74d982c218f83ab926, type: 3}
+  - Key: high_off
+    Clip: {fileID: 8300000, guid: dc3a493eab9d6b74c8ec631a2ab65c72, type: 3}
+  - Key: very_high_off
+    Clip: {fileID: 8300000, guid: 894e4124d73f2c84a863127742985239, type: 3}
+  - Key: PUNCH_CLEAN_HEAVY_10
+    Clip: {fileID: 8300000, guid: d7da440ad4f6c4e7489efd85844988d8, type: 3}
+  - Key: Gregor Quendel - Free Crowd Cheering Sounds - 10 - Ambience
+    Clip: {fileID: 8300000, guid: 921f3e39dc022452fb49e59028e5b373, type: 3}
+  - Key: Gregor Quendel - Free Crowd Cheering Sounds - 05 - Soft cheering - I
+    Clip: {fileID: 8300000, guid: a324ad6715a304a00b95f38797efa797, type: 3}
+  - Key: Gregor Quendel - Free Crowd Cheering Sounds - 07 - Soft cheering and chatter
+    Clip: {fileID: 8300000, guid: ea0a12a511c3e4f92b90aa19c11f9b85, type: 3}
+  - Key: Gregor Quendel - Free Crowd Cheering Sounds - 03 - Strong cheering - I
+    Clip: {fileID: 8300000, guid: 1ef6d499256c74e98a4fa1596ef8652c, type: 3}
+  - Key: Gregor Quendel - Free Crowd Cheering Sounds - 04 - Strong cheering - II - Short
+    Clip: {fileID: 8300000, guid: 094ec6cd91fde4eeb870a11c60f239e4, type: 3}
+  - Key: Gregor Quendel - Free Crowd Cheering Sounds - 08 - Rhythmic cheering
+    Clip: {fileID: 8300000, guid: 5fa0ff60099584abb9123a1620892533, type: 3}
+  - Key: Gregor Quendel - Free Crowd Cheering Sounds - 01 - Strong cheering and strong rhythmic cheering
+    Clip: {fileID: 8300000, guid: 7976a6467ff124bddb632ca0cbd1ab14, type: 3}
+  - Key: Gregor Quendel - Free Crowd Cheering Sounds - 02 - Strong cheering and soft rhythmic cheering
+    Clip: {fileID: 8300000, guid: 027a72b922e6f4776a32ba9c18f8c245, type: 3}

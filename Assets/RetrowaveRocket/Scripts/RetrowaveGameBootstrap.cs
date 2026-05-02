@@ -74,6 +74,8 @@ namespace RetrowaveRocket
         private const string YughuesBallMaterialAssetPath = "Assets/YughuesFreeMetalMaterials/Materials/M_YFMeM_49.mat";
         private const string YughuesBallMaterialResourcePath = "RetrowaveRocket/M_YFMeM_49_Ball";
         private const float YughuesBallTextureTiling = 2.2f;
+        private const uint NetworkSimulationTickRate = 50;
+        private const int ClientInterpolationBufferTicks = 1;
         private const float RoleSelectionRequestTimeoutSeconds = 2f;
         private static readonly Color BallSurfaceTint = new Color(0.66f, 0.7f, 0.76f, 1f);
         private static readonly Color BallSurfaceEmission = new Color(0.9f, 0.9f, 0.9f, 1f);
@@ -552,8 +554,9 @@ namespace RetrowaveRocket
             _networkManager.NetworkConfig.EnableSceneManagement = false;
             _networkManager.NetworkConfig.ConnectionApproval = false;
             _networkManager.NetworkConfig.SpawnTimeout = 5f;
-            _networkManager.NetworkConfig.TickRate = 60;
+            _networkManager.NetworkConfig.TickRate = NetworkSimulationTickRate;
             _networkManager.NetworkConfig.EnsureNetworkVariableLengthSafety = true;
+            NetworkTransform.InterpolationBufferTickOffset = Mathf.Max(NetworkTransform.InterpolationBufferTickOffset, ClientInterpolationBufferTicks);
 
             if (_networkManager.NetworkConfig.Prefabs == null)
             {
@@ -4710,8 +4713,9 @@ namespace RetrowaveRocket
             };
 
             prefab.AddComponent<NetworkObject>();
-            prefab.AddComponent<NetworkTransform>();
-            prefab.AddComponent<NetworkRigidbody>();
+            ConfigurePhysicsNetworkTransform(prefab.AddComponent<NetworkTransform>());
+            var networkRigidbody = prefab.AddComponent<NetworkRigidbody>();
+            networkRigidbody.UseRigidBodyForMotion = true;
             prefab.AddComponent<VehicleStatusEffects>();
             prefab.AddComponent<VehicleOverdriveSystem>();
             prefab.AddComponent<VehicleStyleMeter>();
@@ -4758,13 +4762,36 @@ namespace RetrowaveRocket
             collider.material = material;
 
             prefab.AddComponent<NetworkObject>();
-            prefab.AddComponent<NetworkTransform>();
-            prefab.AddComponent<NetworkRigidbody>();
+            ConfigurePhysicsNetworkTransform(prefab.AddComponent<NetworkTransform>());
+            var networkRigidbody = prefab.AddComponent<NetworkRigidbody>();
+            networkRigidbody.UseRigidBodyForMotion = true;
             prefab.AddComponent<RetrowaveBallStateController>();
             prefab.AddComponent<RetrowaveBall>();
             prefab.GetComponent<MeshRenderer>().sharedMaterial = CreateBallSurfaceMaterial();
             FinalizeRuntimePrefab(prefab, 0xA1000002u, isTemplate);
             return prefab;
+        }
+
+        private static void ConfigurePhysicsNetworkTransform(NetworkTransform networkTransform)
+        {
+            if (networkTransform == null)
+            {
+                return;
+            }
+
+            networkTransform.UseUnreliableDeltas = true;
+            networkTransform.Interpolate = true;
+            networkTransform.UseQuaternionSynchronization = true;
+            networkTransform.SyncScaleX = false;
+            networkTransform.SyncScaleY = false;
+            networkTransform.SyncScaleZ = false;
+            networkTransform.PositionInterpolationType = NetworkTransform.InterpolationTypes.SmoothDampening;
+            networkTransform.RotationInterpolationType = NetworkTransform.InterpolationTypes.SmoothDampening;
+            networkTransform.ScaleInterpolationType = NetworkTransform.InterpolationTypes.Lerp;
+            networkTransform.PositionLerpSmoothing = true;
+            networkTransform.RotationLerpSmoothing = true;
+            networkTransform.PositionMaxInterpolationTime = 0.075f;
+            networkTransform.RotationMaxInterpolationTime = 0.075f;
         }
 
         private static Material CreateBallSurfaceMaterial()

@@ -1,5 +1,6 @@
 #pragma warning disable 0649
 
+using System;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -82,7 +83,7 @@ namespace RetrowaveRocket
             }
 
             var instance = Instance;
-            instance.PlayTransientCue(instance._impactClip, position, RetrowaveAudioPriority.Important, RetrowaveGameSettings.SfxVolume, 0.34f * Mathf.Max(0.1f, volumeScale), 0.78f, Random.Range(0.88f, 0.96f));
+            instance.PlayTransientCue(instance._impactClip, position, RetrowaveAudioPriority.Important, RetrowaveGameSettings.SfxVolume, 0.34f * Mathf.Max(0.1f, volumeScale), 0.78f, UnityEngine.Random.Range(0.88f, 0.96f));
         }
 
         public static void PlayGoalCelebration(Vector3 position)
@@ -100,7 +101,7 @@ namespace RetrowaveRocket
         {
             var instance = Instance;
             var volumeScale = Mathf.Lerp(0.16f, 0.62f, Mathf.Clamp01(intensity));
-            instance.PlayTransientCue(instance._impactClip, position, RetrowaveAudioPriority.Gameplay, RetrowaveGameSettings.SfxVolume, volumeScale, 0.92f, Random.Range(0.94f, 1.05f));
+            instance.PlayTransientCue(instance._impactClip, position, RetrowaveAudioPriority.Gameplay, RetrowaveGameSettings.SfxVolume, volumeScale, 0.92f, UnityEngine.Random.Range(0.94f, 1.05f));
         }
 
         public static void PlayObjectiveCapture(Vector3 position)
@@ -166,37 +167,74 @@ namespace RetrowaveRocket
 
             if (_softCheers.Length == 0)
             {
-                _softCheers = new[]
-                {
+                _softCheers = BuildClipArray(
                     LoadClip("Gregor Quendel - Free Crowd Cheering Sounds - 05 - Soft cheering - I"),
                     LoadClip("Gregor Quendel - Free Crowd Cheering Sounds - 06 - Soft cheering - II"),
-                    LoadClip("Gregor Quendel - Free Crowd Cheering Sounds - 07 - Soft cheering and chatter"),
-                };
+                    LoadClip("Gregor Quendel - Free Crowd Cheering Sounds - 07 - Soft cheering and chatter"));
             }
 
             if (_strongCheers.Length == 0)
             {
-                _strongCheers = new[]
-                {
+                _strongCheers = BuildClipArray(
                     LoadClip("Gregor Quendel - Free Crowd Cheering Sounds - 03 - Strong cheering - I"),
                     LoadClip("Gregor Quendel - Free Crowd Cheering Sounds - 04 - Strong cheering - II - Short"),
-                    LoadClip("Gregor Quendel - Free Crowd Cheering Sounds - 08 - Rhythmic cheering"),
-                };
+                    LoadClip("Gregor Quendel - Free Crowd Cheering Sounds - 08 - Rhythmic cheering"));
             }
 
             if (_goalCheers.Length == 0)
             {
-                _goalCheers = new[]
-                {
+                _goalCheers = BuildClipArray(
                     LoadClip("Gregor Quendel - Free Crowd Cheering Sounds - 01 - Strong cheering and strong rhythmic cheering"),
                     LoadClip("Gregor Quendel - Free Crowd Cheering Sounds - 02 - Strong cheering and soft rhythmic cheering"),
-                    LoadClip("Gregor Quendel - Free Crowd Cheering Sounds - 03 - Strong cheering - I"),
-                };
+                    LoadClip("Gregor Quendel - Free Crowd Cheering Sounds - 03 - Strong cheering - I"));
             }
+        }
+
+        private static AudioClip[] BuildClipArray(params AudioClip[] clips)
+        {
+            if (clips == null || clips.Length == 0)
+            {
+                return Array.Empty<AudioClip>();
+            }
+
+            var count = 0;
+
+            for (var i = 0; i < clips.Length; i++)
+            {
+                if (clips[i] != null)
+                {
+                    count++;
+                }
+            }
+
+            if (count == clips.Length)
+            {
+                return clips;
+            }
+
+            var compact = new AudioClip[count];
+            var writeIndex = 0;
+
+            for (var i = 0; i < clips.Length; i++)
+            {
+                if (clips[i] != null)
+                {
+                    compact[writeIndex++] = clips[i];
+                }
+            }
+
+            return compact;
         }
 
         private static AudioClip LoadClip(string clipNameOrAssetPath)
         {
+            var libraryClip = RetrowaveAudioLibrary.Resolve(clipNameOrAssetPath);
+
+            if (libraryClip != null)
+            {
+                return libraryClip;
+            }
+
 #if UNITY_EDITOR
             var assetPath = clipNameOrAssetPath.StartsWith("Assets/")
                 ? clipNameOrAssetPath
@@ -273,7 +311,7 @@ namespace RetrowaveRocket
                 RetrowaveCrowdCheerIntensity.Strong => 0.82f,
                 _ => 0.64f,
             };
-            PlayTransientCue(clip, position, priority, RetrowaveGameSettings.MusicVolume, volume * volumeScale, 0f, Random.Range(0.97f, 1.03f));
+            PlayTransientCue(clip, position, priority, RetrowaveGameSettings.MusicVolume, volume * volumeScale, 0f, UnityEngine.Random.Range(0.97f, 1.03f));
         }
 
         private static AudioClip ResolveRandomClip(AudioClip[] clips)
@@ -285,7 +323,7 @@ namespace RetrowaveRocket
 
             for (var attempt = 0; attempt < clips.Length; attempt++)
             {
-                var clip = clips[Random.Range(0, clips.Length)];
+                var clip = clips[UnityEngine.Random.Range(0, clips.Length)];
 
                 if (clip != null)
                 {

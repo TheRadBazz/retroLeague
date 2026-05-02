@@ -211,8 +211,9 @@ namespace RetrowaveRocket
             _estimatedVelocity = Vector3.Lerp(_estimatedVelocity, frameVelocity, Time.deltaTime * 10f);
             _lastTargetPosition = targetTransform.position;
 
-            var bodyVelocity = _target.Body != null && _target.Body.linearVelocity.sqrMagnitude > 0.1f
-                ? _target.Body.linearVelocity
+            var currentVelocity = _target.CurrentVelocity;
+            var bodyVelocity = currentVelocity.sqrMagnitude > 0.1f
+                ? currentVelocity
                 : _estimatedVelocity;
             var blendedUp = Vector3.Slerp(Vector3.up, targetTransform.up, 0.35f);
             var baseRotation = Quaternion.LookRotation(targetTransform.forward, blendedUp);
