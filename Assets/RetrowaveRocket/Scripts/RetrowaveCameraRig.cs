@@ -12,7 +12,7 @@ namespace RetrowaveRocket
         {
             Overview = 0,
             ControlledPlayer = 1,
-            WarmupSpectator = 2,
+            SpectatorFollow = 2,
             Podium = 3,
         }
 
@@ -78,10 +78,10 @@ namespace RetrowaveRocket
             _instance.AttachInternal(target, FollowMode.ControlledPlayer);
         }
 
-        public static void AttachWarmupSpectatorTarget(RetrowavePlayerController target)
+        public static void AttachSpectatorTarget(RetrowavePlayerController target)
         {
             EnsureCamera();
-            _instance.AttachInternal(target, FollowMode.WarmupSpectator);
+            _instance.AttachInternal(target, FollowMode.SpectatorFollow);
         }
 
         public static bool IsFollowing(RetrowavePlayerController target)
@@ -89,10 +89,11 @@ namespace RetrowaveRocket
             EnsureCamera();
             return target != null
                    && _instance._target == target
-                   && (_instance._followMode == FollowMode.ControlledPlayer || _instance._followMode == FollowMode.WarmupSpectator);
+                   && (_instance._followMode == FollowMode.ControlledPlayer
+                       || _instance._followMode == FollowMode.SpectatorFollow);
         }
 
-        public static void CycleWarmupSpectatorTarget(int direction, System.Collections.Generic.IReadOnlyList<RetrowavePlayerController> candidates)
+        public static void CycleSpectatorTarget(int direction, System.Collections.Generic.IReadOnlyList<RetrowavePlayerController> candidates)
         {
             EnsureCamera();
 
@@ -116,7 +117,7 @@ namespace RetrowaveRocket
             var nextIndex = currentIndex < 0
                 ? 0
                 : (currentIndex + direction + candidates.Count) % candidates.Count;
-            _instance.AttachInternal(candidates[nextIndex], FollowMode.WarmupSpectator);
+            _instance.AttachInternal(candidates[nextIndex], FollowMode.SpectatorFollow);
         }
 
         public static string GetSpectatorCameraLabel()
@@ -128,9 +129,9 @@ namespace RetrowaveRocket
                 return "Camera: winners podium";
             }
 
-            if (_instance._followMode == FollowMode.WarmupSpectator && _instance._target != null)
+            if (_instance._followMode == FollowMode.SpectatorFollow && _instance._target != null)
             {
-                return $"Camera: warmup follow on Player {_instance._target.OwnerClientId}";
+                return $"Camera: following Player {_instance._target.OwnerClientId}";
             }
 
             return "Camera: spectator overview";
@@ -214,7 +215,7 @@ namespace RetrowaveRocket
                 return;
             }
 
-            if (_followMode == FollowMode.WarmupSpectator && !_target.IsArenaParticipant)
+            if (_followMode == FollowMode.SpectatorFollow && !_target.IsArenaParticipant)
             {
                 ShowOverview();
                 return;

@@ -93,6 +93,14 @@ namespace RetrowaveRocket
         public static RetrowaveTestArenaManager Instance { get; private set; }
         public bool IsLocalSettingsVisible => RetrowaveGameBootstrap.Instance != null && RetrowaveGameBootstrap.Instance.IsSharedSettingsOverlayVisible();
 
+        public static void TearDownForSceneExit()
+        {
+            if (Instance != null)
+            {
+                Instance.TearDownLocalUiForSceneExit();
+            }
+        }
+
         public static void Ensure(Scene scene)
         {
             if (scene.name != RetrowaveGameBootstrap.TestArenaSceneName)

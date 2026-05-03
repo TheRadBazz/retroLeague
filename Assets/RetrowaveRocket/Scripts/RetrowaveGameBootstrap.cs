@@ -489,20 +489,20 @@ namespace RetrowaveRocket
 
         private void HandleSpectatorFollowHotkeys(Keyboard keyboard)
         {
-            if (!CanCycleWarmupSpectatorTargets())
+            if (!CanCycleSpectatorTargets())
             {
                 return;
             }
 
             if (keyboard.leftBracketKey.wasPressedThisFrame || keyboard.commaKey.wasPressedThisFrame)
             {
-                RetrowaveCameraRig.CycleWarmupSpectatorTarget(-1, GetWarmupSpectatorTargets());
+                RetrowaveCameraRig.CycleSpectatorTarget(-1, GetSpectatorTargets());
                 return;
             }
 
             if (keyboard.rightBracketKey.wasPressedThisFrame || keyboard.periodKey.wasPressedThisFrame)
             {
-                RetrowaveCameraRig.CycleWarmupSpectatorTarget(1, GetWarmupSpectatorTargets());
+                RetrowaveCameraRig.CycleSpectatorTarget(1, GetSpectatorTargets());
             }
         }
 
@@ -605,11 +605,18 @@ namespace RetrowaveRocket
 
         public void ReturnToMainMenu()
         {
+            var returningFromTestArena = IsTestArenaScene(SceneManager.GetActiveScene());
             _showPauseMenu = false;
             _showScoreboard = false;
             ClearPendingRoleSelectionRequest();
             ClearGoalCelebrationState();
             CloseGameplaySettingsOverlay();
+
+            if (returningFromTestArena)
+            {
+                RetrowaveTestArenaManager.TearDownForSceneExit();
+            }
+
             ShutdownSession();
             DestroyGameplayMenuOverlay();
             DestroyGameplaySettingsOverlay();
@@ -635,38 +642,9 @@ namespace RetrowaveRocket
             Time.timeScale = 1f;
             Time.fixedDeltaTime = _defaultFixedDeltaTime;
 
-            var eventSystem = FindAnyObjectByType<EventSystem>(FindObjectsInactive.Include);
+            yield return null;
 
-            if (eventSystem == null)
-            {
-                var eventSystemObject = new GameObject("EventSystem", typeof(EventSystem), typeof(InputSystemUIInputModule));
-                eventSystem = eventSystemObject.GetComponent<EventSystem>();
-                eventSystemObject.GetComponent<InputSystemUIInputModule>().AssignDefaultActions();
-            }
-
-            if (eventSystem != null)
-            {
-                var inputSystemModule = eventSystem.GetComponent<InputSystemUIInputModule>();
-
-                if (inputSystemModule == null)
-                {
-                    inputSystemModule = eventSystem.gameObject.AddComponent<InputSystemUIInputModule>();
-                }
-
-                inputSystemModule.AssignDefaultActions();
-                inputSystemModule.enabled = true;
-                eventSystem.enabled = true;
-                eventSystem.gameObject.SetActive(true);
-
-                var legacyModule = eventSystem.GetComponent<StandaloneInputModule>();
-
-                if (legacyModule != null)
-                {
-                    legacyModule.enabled = false;
-                }
-
-                eventSystem.SetSelectedGameObject(null);
-            }
+            RetrowaveMainMenuController.EnsureEventSystemIsInputSystemCompatible();
         }
 
         public void BeginGoalCelebration(RetrowaveTeam scoringTeam, string scorerName, string assistName, int blueScore, int pinkScore, float durationSeconds)
@@ -1098,9 +1076,9 @@ namespace RetrowaveRocket
             {
                 GUILayout.Label(RetrowaveCameraRig.GetSpectatorCameraLabel());
 
-                if (CanCycleWarmupSpectatorTargets())
+                if (CanCycleSpectatorTargets())
                 {
-                    GUILayout.Label("Warmup cam: [, ] or < > cycles player follow.");
+                    GUILayout.Label("Spectator cam: [, ] or < > cycles player follow.");
                 }
             }
 
@@ -1384,7 +1362,9 @@ namespace RetrowaveRocket
             }
             else if (hasLocalEntry && localEntry.QueuedForNextRound)
             {
-                _gameplayMenuFooterText.text = "Your new team selection is queued for the next round.";
+                _gameplayMenuFooterText.text = CanCycleSpectatorTargets()
+                    ? "Your new team selection is queued for next round. Spectator cams stay available with [ and ]."
+                    : "Your new team selection is queued for the next round.";
             }
             else if (hostIsPresent && !hostCanStart && matchManager != null)
             {
@@ -1392,8 +1372,8 @@ namespace RetrowaveRocket
             }
             else
             {
-                _gameplayMenuFooterText.text = matchManager != null && matchManager.IsWarmup && CanCycleWarmupSpectatorTargets()
-                    ? "Warmup spectators can cycle player follow cams with [ and ]."
+                _gameplayMenuFooterText.text = CanCycleSpectatorTargets()
+                    ? "Spectators can cycle player follow cams with [ and ]."
                     : "Team changes apply immediately for this client.";
             }
 
@@ -2553,9 +2533,9 @@ namespace RetrowaveRocket
             {
                 var hint = "Esc match menu  •  Tab scoreboard  •  H hide panel";
 
-                if (CanCycleWarmupSpectatorTargets())
+                if (CanCycleSpectatorTargets())
                 {
-                    hint += "\nWarmup spectator cam: [ / ] cycles player follow.";
+                    hint += "\nSpectator cam: [ / ] cycles player follow.";
                 }
 
                 if (matchManager != null
@@ -4673,11 +4653,12 @@ namespace RetrowaveRocket
                    && (GetActiveMatchManager() == null || RetrowavePlayerController.LocalPlayer == null);
         }
 
-        private bool CanCycleWarmupSpectatorTargets()
+        private bool CanCycleSpectatorTargets()
         {
             var matchManager = GetActiveMatchManager();
 
-            if (matchManager == null || !matchManager.IsWarmup)
+            if (matchManager == null
+                || (!matchManager.IsWarmup && !matchManager.IsCountdown && !matchManager.IsLiveMatch))
             {
                 return false;
             }
@@ -4688,12 +4669,12 @@ namespace RetrowaveRocket
             }
 
             return entry.HasSelectedRole
-                   && entry.Role == RetrowaveLobbyRole.Spectator
+                   && entry.ActiveRole == RetrowaveLobbyRole.Spectator
                    && RetrowavePlayerController.LocalOwner == null
-                   && GetWarmupSpectatorTargets().Count > 0;
+                   && GetSpectatorTargets().Count > 0;
         }
 
-        private List<RetrowavePlayerController> GetWarmupSpectatorTargets()
+        private List<RetrowavePlayerController> GetSpectatorTargets()
         {
             var targets = new List<RetrowavePlayerController>();
 

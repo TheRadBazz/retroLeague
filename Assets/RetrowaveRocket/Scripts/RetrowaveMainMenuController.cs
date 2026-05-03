@@ -654,21 +654,20 @@ namespace RetrowaveRocket
             }
         }
 
-        private static void EnsureEventSystemIsInputSystemCompatible()
+        internal static void EnsureEventSystemIsInputSystemCompatible()
         {
             var eventSystems = FindObjectsByType<EventSystem>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-            EventSystem primaryEventSystem = null;
+            var primaryEventSystem = ResolvePrimaryMenuEventSystem(eventSystems);
 
-            if (eventSystems.Length == 0)
+            if (primaryEventSystem == null
+                || (primaryEventSystem.transform.parent != null && !primaryEventSystem.transform.parent.gameObject.activeInHierarchy))
             {
                 var eventSystemObject = new GameObject("EventSystem", typeof(EventSystem), typeof(InputSystemUIInputModule));
                 primaryEventSystem = eventSystemObject.GetComponent<EventSystem>();
-                var newModule = eventSystemObject.GetComponent<InputSystemUIInputModule>();
-                newModule.AssignDefaultActions();
-                newModule.enabled = true;
-                primaryEventSystem.enabled = true;
-                eventSystemObject.SetActive(true);
-                return;
+                var normalizedEventSystems = new EventSystem[eventSystems.Length + 1];
+                eventSystems.CopyTo(normalizedEventSystems, 0);
+                normalizedEventSystems[^1] = primaryEventSystem;
+                eventSystems = normalizedEventSystems;
             }
 
             for (var i = 0; i < eventSystems.Length; i++)
@@ -680,15 +679,29 @@ namespace RetrowaveRocket
                     continue;
                 }
 
+                var isPrimary = eventSystem == primaryEventSystem;
+                eventSystem.gameObject.SetActive(isPrimary);
+                eventSystem.enabled = isPrimary;
+
                 var inputSystemModule = eventSystem.GetComponent<InputSystemUIInputModule>();
 
-                if (inputSystemModule == null)
+                if (isPrimary)
                 {
-                    inputSystemModule = eventSystem.gameObject.AddComponent<InputSystemUIInputModule>();
-                }
+                    if (inputSystemModule == null)
+                    {
+                        inputSystemModule = eventSystem.gameObject.AddComponent<InputSystemUIInputModule>();
+                    }
 
-                inputSystemModule.AssignDefaultActions();
-                inputSystemModule.enabled = true;
+                    inputSystemModule.AssignDefaultActions();
+                    inputSystemModule.enabled = true;
+                    eventSystem.sendNavigationEvents = true;
+                    eventSystem.SetSelectedGameObject(null);
+                    EventSystem.current = eventSystem;
+                }
+                else if (inputSystemModule != null)
+                {
+                    inputSystemModule.enabled = false;
+                }
 
                 var legacyModule = eventSystem.GetComponent<StandaloneInputModule>();
 
@@ -696,18 +709,40 @@ namespace RetrowaveRocket
                 {
                     Destroy(legacyModule);
                 }
+            }
+        }
 
-                if (primaryEventSystem == null)
+        private static EventSystem ResolvePrimaryMenuEventSystem(EventSystem[] eventSystems)
+        {
+            var activeScene = SceneManager.GetActiveScene();
+            EventSystem activeSceneFallback = null;
+            EventSystem inactiveSceneFallback = null;
+
+            for (var i = 0; i < eventSystems.Length; i++)
+            {
+                var eventSystem = eventSystems[i];
+
+                if (eventSystem == null || eventSystem.gameObject.scene != activeScene)
                 {
-                    primaryEventSystem = eventSystem;
-                    primaryEventSystem.enabled = true;
-                    primaryEventSystem.gameObject.SetActive(true);
                     continue;
                 }
 
-                eventSystem.enabled = false;
-                eventSystem.gameObject.SetActive(false);
+                if (eventSystem.gameObject.activeInHierarchy)
+                {
+                    if (eventSystem.sendNavigationEvents)
+                    {
+                        return eventSystem;
+                    }
+
+                    activeSceneFallback ??= eventSystem;
+                }
+                else
+                {
+                    inactiveSceneFallback ??= eventSystem;
+                }
             }
+
+            return activeSceneFallback != null ? activeSceneFallback : inactiveSceneFallback;
         }
 
         private void ConfigurePanelLayout(Transform panel)
