@@ -34,6 +34,7 @@ namespace RetrowaveRocket
         private readonly Dictionary<ulong, float> _stunImmunityUntil = new();
 
         private Rigidbody _rigidbody;
+        private RetrowavePlayerController _player;
         private float _stunnedUntil;
         private float _immunityPruneTimer;
 
@@ -44,11 +45,14 @@ namespace RetrowaveRocket
         private void Awake()
         {
             _rigidbody = GetComponent<Rigidbody>();
+            _player = GetComponent<RetrowavePlayerController>();
         }
+
+        private bool HasSimulationAuthority => IsServer || (_player != null && _player.IsOfflineMode);
 
         private void FixedUpdate()
         {
-            if (!IsServer)
+            if (!HasSimulationAuthority)
             {
                 return;
             }
@@ -86,7 +90,7 @@ namespace RetrowaveRocket
 
         public bool ApplyStunServer(float duration, Vector3 spinTorque, ulong sourceId, float immunitySeconds)
         {
-            if (!IsServer || duration <= 0f)
+            if (!HasSimulationAuthority || duration <= 0f)
             {
                 return false;
             }
@@ -112,7 +116,7 @@ namespace RetrowaveRocket
 
         public void ApplySlowServer(float duration, float movementMultiplier, float steeringMultiplier, ulong sourceId)
         {
-            if (!IsServer || duration <= 0f)
+            if (!HasSimulationAuthority || duration <= 0f)
             {
                 return;
             }
@@ -143,7 +147,7 @@ namespace RetrowaveRocket
 
         public void ClearServer()
         {
-            if (!IsServer)
+            if (!HasSimulationAuthority)
             {
                 return;
             }

@@ -27,7 +27,9 @@ namespace RetrowaveRocket
                 return false;
             }
 
-            var bombObject = RetrowaveGameBootstrap.Instance.CreateGravityBombDeviceInstance();
+            var bombObject = owner.IsOfflineMode
+                ? RetrowaveGameBootstrap.Instance.CreateOfflineGravityBombDeviceInstance()
+                : RetrowaveGameBootstrap.Instance.CreateGravityBombDeviceInstance();
 
             if (bombObject == null)
             {
@@ -39,28 +41,59 @@ namespace RetrowaveRocket
             bombObject.transform.SetPositionAndRotation(position, Quaternion.identity);
             RetrowaveGameBootstrap.Instance.MoveRuntimeInstanceToGameplayScene(bombObject);
 
-            var networkObject = bombObject.GetComponent<NetworkObject>();
             var bomb = bombObject.GetComponent<GravityBombDevice>();
 
-            if (networkObject == null || bomb == null)
+            if (bomb == null)
             {
                 Destroy(bombObject);
                 return false;
             }
 
-            networkObject.Spawn();
-            bomb.InitializeServer(
-                owner.OwnerClientId,
-                owner.Team,
-                _fuseTime,
-                _explosionRadius,
-                _maxForce,
-                _upwardForceMultiplier,
-                _vehicleLayerMask,
-                _ballLayerMask,
-                _affectBall,
-                _ballForceMultiplier);
-            PlayDeployCueClientRpc(position);
+            if (owner.IsOfflineMode)
+            {
+                bomb.EnableOfflineMode();
+                bomb.InitializeOffline(
+                    owner.ControllingClientId,
+                    owner.Team,
+                    _fuseTime,
+                    _explosionRadius,
+                    _maxForce,
+                    _upwardForceMultiplier,
+                    _vehicleLayerMask,
+                    _ballLayerMask,
+                    _affectBall,
+                    _ballForceMultiplier);
+
+                if (_deployCue != null)
+                {
+                    RetrowaveArenaAudio.PlayRarePowerCue(_deployCue, position, 0.96f);
+                }
+            }
+            else
+            {
+                var networkObject = bombObject.GetComponent<NetworkObject>();
+
+                if (networkObject == null)
+                {
+                    Destroy(bombObject);
+                    return false;
+                }
+
+                networkObject.Spawn();
+                bomb.InitializeServer(
+                    owner.OwnerClientId,
+                    owner.Team,
+                    _fuseTime,
+                    _explosionRadius,
+                    _maxForce,
+                    _upwardForceMultiplier,
+                    _vehicleLayerMask,
+                    _ballLayerMask,
+                    _affectBall,
+                    _ballForceMultiplier);
+                PlayDeployCueClientRpc(position);
+            }
+
             return true;
         }
 

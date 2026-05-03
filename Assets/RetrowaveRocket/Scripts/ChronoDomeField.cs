@@ -40,6 +40,8 @@ namespace RetrowaveRocket
         private float _nextTickAt;
         private float _spawnedAt;
         private ulong _sourceId;
+        private bool _offlineMode;
+        private bool HasSimulationAuthority => IsServer || _offlineMode;
 
         private void Awake()
         {
@@ -47,6 +49,7 @@ namespace RetrowaveRocket
             _trigger.isTrigger = true;
             _trigger.enabled = false;
             EnsureVisual();
+            RefreshRadius();
         }
 
         public override void OnNetworkSpawn()
@@ -63,9 +66,15 @@ namespace RetrowaveRocket
             base.OnNetworkDespawn();
         }
 
+        public void EnableOfflineMode()
+        {
+            _offlineMode = true;
+            RefreshRadius();
+        }
+
         private void FixedUpdate()
         {
-            if (!IsServer || Time.time < _nextTickAt)
+            if (!HasSimulationAuthority || Time.time < _nextTickAt)
             {
                 return;
             }
@@ -117,6 +126,38 @@ namespace RetrowaveRocket
             _tickInterval = 1f / Mathf.Max(1f, tickRate);
             _nextTickAt = Time.time;
             _sourceId = ((ulong)ownerClientId << 32) ^ (ulong)NetworkObjectId;
+            _recordedHits.Clear();
+            RefreshRadius();
+            StartCoroutine(ExpireRoutine(_duration.Value));
+        }
+
+        public void InitializeOffline(
+            ulong ownerClientId,
+            RetrowaveTeam ownerTeam,
+            float radius,
+            float duration,
+            float movementMultiplier,
+            float steeringMultiplier,
+            bool affectFriendlyPlayers,
+            bool hardFreeze,
+            bool affectBall,
+            float ballVelocityDampingPerTick,
+            float tickRate)
+        {
+            _offlineMode = true;
+            _ownerClientId = ownerClientId;
+            _ownerTeam = ownerTeam;
+            _radius.Value = Mathf.Max(0.5f, radius);
+            _duration.Value = Mathf.Max(0.25f, duration);
+            _movementMultiplier = hardFreeze ? 0f : Mathf.Clamp01(movementMultiplier);
+            _steeringMultiplier = hardFreeze ? 0f : Mathf.Clamp01(steeringMultiplier);
+            _affectFriendlyPlayers = affectFriendlyPlayers;
+            _affectBall = affectBall;
+            _ballVelocityDampingPerTick = Mathf.Clamp01(ballVelocityDampingPerTick);
+            _tickInterval = 1f / Mathf.Max(1f, tickRate);
+            _nextTickAt = Time.time;
+            _spawnedAt = Time.time;
+            _sourceId = ((ulong)ownerClientId << 32) ^ (ulong)GetInstanceID();
             _recordedHits.Clear();
             RefreshRadius();
             StartCoroutine(ExpireRoutine(_duration.Value));
@@ -180,6 +221,17 @@ namespace RetrowaveRocket
         private IEnumerator ExpireRoutine(float duration)
         {
             yield return new WaitForSeconds(duration);
+            if (_offlineMode)
+            {
+                if (_expireCue != null)
+                {
+                    RetrowaveArenaAudio.PlayCue(_expireCue, transform.position, RetrowaveAudioPriority.Gameplay, 0.82f, 0.72f);
+                }
+
+                Destroy(gameObject);
+                yield break;
+            }
+
             ExpireClientRpc();
 
             if (IsServer && NetworkObject != null && NetworkObject.IsSpawned)

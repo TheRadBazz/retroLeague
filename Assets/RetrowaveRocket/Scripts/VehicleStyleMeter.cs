@@ -31,6 +31,8 @@ namespace RetrowaveRocket
             NetworkVariableReadPermission.Everyone,
             NetworkVariableWritePermission.Server);
 
+        private RetrowavePlayerController _player;
+
         public float Style => Mathf.Clamp(_style.Value, 0f, MaxStyle);
         public float StyleNormalized => Mathf.Clamp01(Style / MaxStyle);
         public float CaptureSpeedMultiplier => Mathf.Lerp(1f, 1.22f, StyleNormalized);
@@ -41,9 +43,16 @@ namespace RetrowaveRocket
             ? (RetrowaveStyleEvent)_lastAwardEventValue.Value
             : RetrowaveStyleEvent.ControlledTouch;
 
+        private bool HasSimulationAuthority => IsServer || (_player != null && _player.IsOfflineMode);
+
+        private void Awake()
+        {
+            _player = GetComponent<RetrowavePlayerController>();
+        }
+
         private void FixedUpdate()
         {
-            if (!IsServer || _style.Value <= 0f)
+            if (!HasSimulationAuthority || _style.Value <= 0f)
             {
                 return;
             }
@@ -53,7 +62,7 @@ namespace RetrowaveRocket
 
         public float AwardServer(RetrowaveStyleEvent styleEvent, float multiplier = 1f)
         {
-            if (!IsServer)
+            if (!HasSimulationAuthority)
             {
                 return 0f;
             }
@@ -79,7 +88,7 @@ namespace RetrowaveRocket
 
         public void ClearServer()
         {
-            if (IsServer)
+            if (HasSimulationAuthority)
             {
                 _style.Value = 0f;
                 _lastAwardEventValue.Value = -1;

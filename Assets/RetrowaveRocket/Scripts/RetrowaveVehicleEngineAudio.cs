@@ -86,7 +86,7 @@ namespace RetrowaveRocket
                 return;
             }
 
-            var isActive = _player.IsSpawned && _player.IsArenaParticipant;
+            var isActive = _player.IsRuntimeActive && _player.IsArenaParticipant;
 
             if (isActive && !_wasActive)
             {
@@ -291,7 +291,7 @@ namespace RetrowaveRocket
             }
 
             var sfxVolume = RetrowaveGameSettings.SfxVolume;
-            var volumeBase = sfxVolume * Mathf.Clamp01(_engineMasterVolume) * (_player.IsOwner ? _localVolume : _remoteVolume);
+            var volumeBase = sfxVolume * Mathf.Clamp01(_engineMasterVolume) * (_player.HasLocalInputAuthority ? _localVolume : _remoteVolume);
             var throttleActive = Mathf.Abs(_player.EngineAudioThrottle) > 0.05f || _player.EngineAudioBoosting;
             var movingWithoutThrottle = !throttleActive && _player.CurrentSpeed > _coastOffLoopSpeedThreshold;
             var onBlend = Mathf.SmoothStep(0f, 1f, _load);
@@ -342,7 +342,7 @@ namespace RetrowaveRocket
                 return;
             }
 
-            _oneShotSource.volume = RetrowaveGameSettings.SfxVolume * Mathf.Clamp01(_engineMasterVolume) * (_player != null && _player.IsOwner ? _localVolume : _remoteVolume);
+            _oneShotSource.volume = RetrowaveGameSettings.SfxVolume * Mathf.Clamp01(_engineMasterVolume) * (_player != null && _player.HasLocalInputAuthority ? _localVolume : _remoteVolume);
             _oneShotSource.PlayOneShot(clip, Mathf.Clamp01(volumeScale));
         }
 

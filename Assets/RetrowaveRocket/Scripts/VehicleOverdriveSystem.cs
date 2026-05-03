@@ -32,6 +32,7 @@ namespace RetrowaveRocket
             NetworkVariableWritePermission.Server);
 
         private float _temporaryOverchargeUntil;
+        private RetrowavePlayerController _player;
 
         public float Heat => Mathf.Clamp(_heat.Value, 0f, MaxHeat);
         public float HeatNormalized => Mathf.Clamp01(Heat / MaxHeat);
@@ -53,9 +54,16 @@ namespace RetrowaveRocket
         public float GroundGripMultiplier => Mathf.Lerp(1f, 0.82f, Mathf.InverseLerp(_highHeatThreshold, 1f, HeatNormalized));
         public float RechargeMultiplier => IsOverheated ? 0.55f : Mathf.Lerp(1.05f, 0.76f, HeatNormalized);
 
+        private bool HasSimulationAuthority => IsServer || (_player != null && _player.IsOfflineMode);
+
+        private void Awake()
+        {
+            _player = GetComponent<RetrowavePlayerController>();
+        }
+
         public void TickServer(bool isBoosting, bool isGliding, bool treatedAsGrounded)
         {
-            if (!IsServer)
+            if (!HasSimulationAuthority)
             {
                 return;
             }
@@ -93,7 +101,7 @@ namespace RetrowaveRocket
 
         public void RegisterJumpServer()
         {
-            if (IsServer)
+            if (HasSimulationAuthority)
             {
                 SetHeatServer(_heat.Value + _jumpHeat);
             }
@@ -101,7 +109,7 @@ namespace RetrowaveRocket
 
         public void ApplyOverchargeServer(float durationSeconds, float coolingAmount)
         {
-            if (!IsServer)
+            if (!HasSimulationAuthority)
             {
                 return;
             }
@@ -113,7 +121,7 @@ namespace RetrowaveRocket
 
         public void ClearServer()
         {
-            if (!IsServer)
+            if (!HasSimulationAuthority)
             {
                 return;
             }

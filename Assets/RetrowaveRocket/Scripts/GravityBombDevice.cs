@@ -42,6 +42,8 @@ namespace RetrowaveRocket
         private bool _affectBall;
         private float _ballForceMultiplier;
         private float _spawnedAt;
+        private bool _offlineMode;
+        private bool HasSimulationAuthority => IsServer || _offlineMode;
 
         private void Awake()
         {
@@ -49,6 +51,7 @@ namespace RetrowaveRocket
             _trigger.isTrigger = true;
             _trigger.enabled = false;
             EnsureVisuals();
+            RefreshRadius();
         }
 
         public override void OnNetworkSpawn()
@@ -65,6 +68,12 @@ namespace RetrowaveRocket
             _radius.OnValueChanged -= HandleRadiusChanged;
             _detonated.OnValueChanged -= HandleDetonatedChanged;
             base.OnNetworkDespawn();
+        }
+
+        public void EnableOfflineMode()
+        {
+            _offlineMode = true;
+            RefreshRadius();
         }
 
         private void Update()
@@ -115,11 +124,38 @@ namespace RetrowaveRocket
             StartCoroutine(FuseRoutine(_fuseTime.Value));
         }
 
+        public void InitializeOffline(
+            ulong ownerClientId,
+            RetrowaveTeam ownerTeam,
+            float fuseTime,
+            float radius,
+            float maxForce,
+            float upwardForceMultiplier,
+            LayerMask vehicleLayerMask,
+            LayerMask ballLayerMask,
+            bool affectBall,
+            float ballForceMultiplier)
+        {
+            _offlineMode = true;
+            _fuseTime.Value = Mathf.Max(0.05f, fuseTime);
+            _radius.Value = Mathf.Max(0.5f, radius);
+            _ownerClientId = ownerClientId;
+            _maxForce = Mathf.Max(0f, maxForce);
+            _upwardForceMultiplier = Mathf.Max(0f, upwardForceMultiplier);
+            _vehicleLayerMask = vehicleLayerMask;
+            _ballLayerMask = ballLayerMask;
+            _affectBall = affectBall;
+            _ballForceMultiplier = Mathf.Clamp01(ballForceMultiplier);
+            _spawnedAt = Time.time;
+            RefreshRadius();
+            StartCoroutine(FuseRoutine(_fuseTime.Value));
+        }
+
         private IEnumerator FuseRoutine(float fuseTime)
         {
             yield return new WaitForSeconds(fuseTime);
 
-            if (IsServer)
+            if (HasSimulationAuthority)
             {
                 DetonateServer();
             }
@@ -179,7 +215,15 @@ namespace RetrowaveRocket
                 }
             }
 
-            DetonateClientRpc();
+            if (_offlineMode)
+            {
+                RetrowaveArenaAudio.PlayRarePowerCue(_detonateCue, transform.position, 1.12f);
+            }
+            else
+            {
+                DetonateClientRpc();
+            }
+
             StartCoroutine(DespawnAfterDelay());
         }
 
@@ -193,7 +237,11 @@ namespace RetrowaveRocket
         {
             yield return new WaitForSeconds(0.25f);
 
-            if (IsServer && NetworkObject != null && NetworkObject.IsSpawned)
+            if (_offlineMode)
+            {
+                Destroy(gameObject);
+            }
+            else if (IsServer && NetworkObject != null && NetworkObject.IsSpawned)
             {
                 NetworkObject.Despawn(true);
             }

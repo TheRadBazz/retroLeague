@@ -28,6 +28,8 @@ namespace RetrowaveRocket
 
         private readonly List<RarePowerUpPickupBeacon> _activeBeacons = new();
         private float _spawnTimer;
+        private bool _offlineMode;
+        private bool HasSimulationAuthority => IsServer || _offlineMode;
 
         public static event Action<RetrowaveRarePowerUpType, Vector3> RareBeaconSpawned;
 
@@ -41,9 +43,41 @@ namespace RetrowaveRocket
             }
         }
 
+        public void EnableOfflineMode()
+        {
+            _offlineMode = true;
+            ScheduleNextSpawn();
+        }
+
+        public void ConfigureOfflineFreeplay(
+            float minDelaySeconds = 8f,
+            float maxDelaySeconds = 16f,
+            bool spawnImmediately = true,
+            bool requireCapture = true,
+            float captureSeconds = 5f,
+            bool allowReplacement = false)
+        {
+            _offlineMode = true;
+            _spawnDelayRange = new Vector2(
+                Mathf.Max(1f, Mathf.Min(minDelaySeconds, maxDelaySeconds)),
+                Mathf.Max(minDelaySeconds, maxDelaySeconds));
+            _requireCapture = requireCapture;
+            _captureSeconds = Mathf.Max(0.1f, captureSeconds);
+            _allowReplacement = allowReplacement;
+
+            if (spawnImmediately)
+            {
+                _spawnTimer = 0.15f;
+            }
+            else
+            {
+                ScheduleNextSpawn();
+            }
+        }
+
         private void Update()
         {
-            if (!IsServer)
+            if (!HasSimulationAuthority)
             {
                 return;
             }
@@ -70,7 +104,7 @@ namespace RetrowaveRocket
 
         public void HandleBeaconResolvedServer(RarePowerUpPickupBeacon beacon)
         {
-            if (!IsServer)
+            if (!HasSimulationAuthority)
             {
                 return;
             }
@@ -86,7 +120,7 @@ namespace RetrowaveRocket
 
         public void ResetForMatchStartServer()
         {
-            if (!IsServer)
+            if (!HasSimulationAuthority)
             {
                 return;
             }
@@ -100,6 +134,10 @@ namespace RetrowaveRocket
                     && activeBeacon.NetworkObject.IsSpawned)
                 {
                     activeBeacon.NetworkObject.Despawn(true);
+                }
+                else if (activeBeacon != null)
+                {
+                    Destroy(activeBeacon.gameObject);
                 }
             }
 
@@ -151,7 +189,9 @@ namespace RetrowaveRocket
 
         private bool TrySpawnBeacon(RetrowaveRarePowerUpType type, Vector3 position)
         {
-            var beaconObject = RetrowaveGameBootstrap.Instance.CreateRarePowerUpPickupBeaconInstance();
+            var beaconObject = _offlineMode
+                ? RetrowaveGameBootstrap.Instance.CreateOfflineRarePowerUpPickupBeaconInstance()
+                : RetrowaveGameBootstrap.Instance.CreateRarePowerUpPickupBeaconInstance();
 
             if (beaconObject == null)
             {
@@ -162,19 +202,36 @@ namespace RetrowaveRocket
             beaconObject.transform.SetPositionAndRotation(position, Quaternion.identity);
             RetrowaveGameBootstrap.Instance.MoveRuntimeInstanceToGameplayScene(beaconObject);
 
-            var networkObject = beaconObject.GetComponent<NetworkObject>();
             var beacon = beaconObject.GetComponent<RarePowerUpPickupBeacon>();
 
-            if (networkObject == null || beacon == null)
+            if (beacon == null)
             {
                 Destroy(beaconObject);
                 return false;
             }
 
-            networkObject.Spawn();
-            beacon.InitializeServer(this, type, _requireCapture, _captureSeconds, _allowReplacement, _beaconRadius);
+            if (_offlineMode)
+            {
+                beacon.EnableOfflineMode();
+                beacon.InitializeOffline(this, type, _requireCapture, _captureSeconds, _allowReplacement, _beaconRadius);
+                RareBeaconSpawned?.Invoke(type, position);
+            }
+            else
+            {
+                var networkObject = beaconObject.GetComponent<NetworkObject>();
+
+                if (networkObject == null)
+                {
+                    Destroy(beaconObject);
+                    return false;
+                }
+
+                networkObject.Spawn();
+                beacon.InitializeServer(this, type, _requireCapture, _captureSeconds, _allowReplacement, _beaconRadius);
+                AnnounceSpawnClientRpc((int)type, position);
+            }
+
             _activeBeacons.Add(beacon);
-            AnnounceSpawnClientRpc((int)type, position);
             return true;
         }
 
@@ -265,7 +322,9 @@ namespace RetrowaveRocket
             {
                 var beacon = _activeBeacons[i];
 
-                if (beacon == null || !beacon.IsSpawned)
+                if (beacon == null
+                    || (_offlineMode && !beacon.IsActive)
+                    || (!_offlineMode && !beacon.IsSpawned))
                 {
                     _activeBeacons.RemoveAt(i);
                 }

@@ -19,6 +19,8 @@ namespace RetrowaveRocket
         private MeshRenderer _renderer;
         private Collider _trigger;
         private Light _glow;
+        private bool _offlineMode;
+        private bool HasSimulationAuthority => IsServer || _offlineMode;
 
         private void Awake()
         {
@@ -31,11 +33,12 @@ namespace RetrowaveRocket
             _glow.type = LightType.Point;
             _glow.range = 8f;
             _glow.intensity = 7f;
+            RefreshVisuals();
         }
 
         private void Update()
         {
-            if (!IsSpawned || IsServer)
+            if (_offlineMode || !IsSpawned || IsServer)
             {
                 transform.Rotate(Vector3.up, 100f * Time.deltaTime, Space.Self);
             }
@@ -56,6 +59,12 @@ namespace RetrowaveRocket
             base.OnNetworkDespawn();
         }
 
+        public void EnableOfflineMode()
+        {
+            _offlineMode = true;
+            RefreshVisuals();
+        }
+
         public void InitializeServer(RetrowavePowerUpType type)
         {
             if (!IsServer)
@@ -63,6 +72,17 @@ namespace RetrowaveRocket
                 return;
             }
 
+            Initialize(type);
+        }
+
+        public void InitializeOffline(RetrowavePowerUpType type)
+        {
+            _offlineMode = true;
+            Initialize(type);
+        }
+
+        private void Initialize(RetrowavePowerUpType type)
+        {
             _powerUpType.Value = (int)type;
             _isAvailable.Value = true;
             RefreshVisuals();
@@ -70,7 +90,7 @@ namespace RetrowaveRocket
 
         private void OnTriggerEnter(Collider other)
         {
-            if (!IsServer || !_isAvailable.Value)
+            if (!HasSimulationAuthority || !_isAvailable.Value)
             {
                 return;
             }
@@ -82,7 +102,15 @@ namespace RetrowaveRocket
 
             player.ApplyPowerUp((RetrowavePowerUpType)_powerUpType.Value);
             _isAvailable.Value = false;
-            PlayPickupFeedbackClientRpc(transform.position);
+            if (_offlineMode)
+            {
+                RetrowaveArenaAudio.PlayImpact(transform.position, 0.34f);
+            }
+            else
+            {
+                PlayPickupFeedbackClientRpc(transform.position);
+            }
+
             StartCoroutine(RespawnRoutine());
         }
 

@@ -69,6 +69,7 @@ namespace RetrowaveRocket
 
         public const string MainMenuSceneName = "MainMenu";
         public const string GameplaySceneName = "SampleScene";
+        public const string TestArenaSceneName = "TestArena";
         private const string SportCarResourcePath = "RetrowaveRocket/SportCar_5";
         private const string YughuesBallMaterialName = "M_YFMeM_49";
         private const string YughuesBallMaterialAssetPath = "Assets/YughuesFreeMetalMaterials/Materials/M_YFMeM_49.mat";
@@ -136,6 +137,7 @@ namespace RetrowaveRocket
         private RectTransform _gameplaySettingsPanelRect;
         private RectTransform _gameplaySettingsContentHost;
         private TMP_Text _gameplaySettingsStatusText;
+        private Button _gameplaySettingsCloseButton;
         private readonly Dictionary<GameplaySettingsTab, Image> _gameplaySettingsTabImages = new();
         private readonly Dictionary<RetrowaveBindingAction, TMP_Text> _gameplaySettingsBindingValueTexts = new();
         private GameplaySettingsTab _gameplaySettingsTab = GameplaySettingsTab.Game;
@@ -247,22 +249,37 @@ namespace RetrowaveRocket
         public string PreferredDisplayName => _preferredDisplayName;
         public RetrowaveMatchSettings CurrentMatchSettings => _currentMatchSettings;
 
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
-        private static void Install()
+        public static RetrowaveGameBootstrap EnsureInstance()
         {
             if (_instance != null)
             {
-                return;
+                return _instance;
             }
 
             var bootstrap = new GameObject("Retrowave Rocket Bootstrap");
             DontDestroyOnLoad(bootstrap);
-            bootstrap.AddComponent<RetrowaveGameBootstrap>();
+            return bootstrap.AddComponent<RetrowaveGameBootstrap>();
+        }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+        private static void Install()
+        {
+            EnsureInstance();
         }
 
         public static bool IsGameplayInputBlocked()
         {
-            return _instance != null && _instance.ShouldBlockGameplayInput();
+            if (_instance != null && _instance.ShouldBlockGameplayInput())
+            {
+                return true;
+            }
+
+            return RetrowaveTestArenaManager.Instance != null && RetrowaveTestArenaManager.Instance.IsLocalSettingsVisible;
+        }
+
+        public void EnsureRuntimeReady()
+        {
+            EnsureNetworkRuntime();
         }
 
         public static void RequestProcessShutdown()
@@ -300,15 +317,17 @@ namespace RetrowaveRocket
             _defaultFixedDeltaTime = Time.fixedDeltaTime;
             _address = ResolvePreferredAddress();
             _preferredDisplayName = NormalizeDisplayName(Environment.UserName);
-
-            EnsureNetworkRuntime();
             SceneManager.sceneLoaded += HandleSceneLoaded;
             ApplyScenePresentation(SceneManager.GetActiveScene());
         }
 
         private void Update()
         {
-            if (_networkManager == null || !IsGameplayScene(SceneManager.GetActiveScene()))
+            var activeScene = SceneManager.GetActiveScene();
+            var isGameplayScene = IsGameplayScene(activeScene);
+            var isTestArenaScene = IsTestArenaScene(activeScene);
+
+            if (!isGameplayScene && !isTestArenaScene)
             {
                 _showPauseMenu = false;
                 _showScoreboard = false;
@@ -325,7 +344,25 @@ namespace RetrowaveRocket
                 return;
             }
 
-            if (!_networkManager.IsListening)
+            if (isTestArenaScene)
+            {
+                _showPauseMenu = false;
+                _showScoreboard = false;
+                ClearPendingRoleSelectionRequest();
+                ClearGoalCelebrationState();
+                ClearPodiumPresentation();
+                SetGameplayMenuVisible(false);
+
+                if (_gameplayHudRoot != null)
+                {
+                    _gameplayHudRoot.SetActive(false);
+                }
+
+                ResetHudInfoIntroState();
+                return;
+            }
+
+            if (_networkManager == null || !_networkManager.IsListening)
             {
                 _showPauseMenu = false;
                 _showScoreboard = false;
@@ -534,17 +571,101 @@ namespace RetrowaveRocket
             return BeginConnectionFromMenu(PendingConnectionMode.Client, address, portText, out message);
         }
 
+        public bool BeginTestArenaFromMenu(string displayName, out string message)
+        {
+            if (_pendingConnectionMode != PendingConnectionMode.None)
+            {
+                message = "A connection is already starting.";
+                return false;
+            }
+
+            _preferredDisplayName = NormalizeDisplayName(displayName);
+            _currentMatchSettings = RetrowaveMatchSettings.Default;
+            RetrowaveArenaConfig.ApplyMatchSettings(_currentMatchSettings);
+            ShutdownSession();
+            message = "Loading the single-player Testing Arena...";
+            StartCoroutine(LoadTestArena());
+            return true;
+        }
+
+        public void OpenSharedSettingsOverlay()
+        {
+            OpenGameplaySettingsOverlay();
+        }
+
+        public void CloseSharedSettingsOverlay()
+        {
+            CloseGameplaySettingsOverlay();
+        }
+
+        public bool IsSharedSettingsOverlayVisible()
+        {
+            return IsGameplaySettingsVisible();
+        }
+
         public void ReturnToMainMenu()
         {
             _showPauseMenu = false;
             _showScoreboard = false;
             ClearPendingRoleSelectionRequest();
             ClearGoalCelebrationState();
+            CloseGameplaySettingsOverlay();
             ShutdownSession();
+            DestroyGameplayMenuOverlay();
+            DestroyGameplaySettingsOverlay();
+            DestroyGameplayHudOverlay();
 
             if (SceneManager.GetActiveScene().name != MainMenuSceneName)
             {
                 SceneManager.LoadScene(MainMenuSceneName, LoadSceneMode.Single);
+            }
+
+            StartCoroutine(FinalizeMainMenuReturn());
+        }
+
+        private IEnumerator FinalizeMainMenuReturn()
+        {
+            while (SceneManager.GetActiveScene().name != MainMenuSceneName)
+            {
+                yield return null;
+            }
+
+            Cursor.visible = true;
+            Cursor.lockState = CursorLockMode.None;
+            Time.timeScale = 1f;
+            Time.fixedDeltaTime = _defaultFixedDeltaTime;
+
+            var eventSystem = FindAnyObjectByType<EventSystem>(FindObjectsInactive.Include);
+
+            if (eventSystem == null)
+            {
+                var eventSystemObject = new GameObject("EventSystem", typeof(EventSystem), typeof(InputSystemUIInputModule));
+                eventSystem = eventSystemObject.GetComponent<EventSystem>();
+                eventSystemObject.GetComponent<InputSystemUIInputModule>().AssignDefaultActions();
+            }
+
+            if (eventSystem != null)
+            {
+                var inputSystemModule = eventSystem.GetComponent<InputSystemUIInputModule>();
+
+                if (inputSystemModule == null)
+                {
+                    inputSystemModule = eventSystem.gameObject.AddComponent<InputSystemUIInputModule>();
+                }
+
+                inputSystemModule.AssignDefaultActions();
+                inputSystemModule.enabled = true;
+                eventSystem.enabled = true;
+                eventSystem.gameObject.SetActive(true);
+
+                var legacyModule = eventSystem.GetComponent<StandaloneInputModule>();
+
+                if (legacyModule != null)
+                {
+                    legacyModule.enabled = false;
+                }
+
+                eventSystem.SetSelectedGameObject(null);
             }
         }
 
@@ -651,11 +772,7 @@ namespace RetrowaveRocket
 
         private bool BeginConnectionFromMenu(PendingConnectionMode mode, string address, string portText, out string message)
         {
-            if (_networkManager == null)
-            {
-                message = "Network bootstrap is not ready yet.";
-                return false;
-            }
+            EnsureNetworkRuntime();
 
             if (_networkManager.IsListening || _pendingConnectionMode != PendingConnectionMode.None)
             {
@@ -818,37 +935,72 @@ namespace RetrowaveRocket
 
         public GameObject CreatePlayerInstance()
         {
-            return CreatePlayerPrefab(false);
+            return CreatePlayerPrefab(false, true);
         }
 
         public GameObject CreateBallInstance()
         {
-            return CreateBallPrefab(false);
+            return CreateBallPrefab(false, true);
+        }
+
+        public GameObject CreateOfflinePlayerInstance()
+        {
+            return CreatePlayerPrefab(false, false);
+        }
+
+        public GameObject CreateOfflineBallInstance()
+        {
+            return CreateBallPrefab(false, false);
         }
 
         public GameObject CreatePowerUpInstance()
         {
-            return CreatePowerUpPrefab(false);
+            return CreatePowerUpPrefab(false, true);
+        }
+
+        public GameObject CreateOfflinePowerUpInstance()
+        {
+            return CreatePowerUpPrefab(false, false);
         }
 
         public GameObject CreateRarePowerUpPickupBeaconInstance()
         {
-            return CreateRarePowerUpPickupBeaconPrefab(false);
+            return CreateRarePowerUpPickupBeaconPrefab(false, true);
+        }
+
+        public GameObject CreateOfflineRarePowerUpPickupBeaconInstance()
+        {
+            return CreateRarePowerUpPickupBeaconPrefab(false, false);
         }
 
         public GameObject CreateNeonTrailSegmentInstance()
         {
-            return CreateNeonTrailSegmentPrefab(false);
+            return CreateNeonTrailSegmentPrefab(false, true);
+        }
+
+        public GameObject CreateOfflineNeonTrailSegmentInstance()
+        {
+            return CreateNeonTrailSegmentPrefab(false, false);
         }
 
         public GameObject CreateGravityBombDeviceInstance()
         {
-            return CreateGravityBombDevicePrefab(false);
+            return CreateGravityBombDevicePrefab(false, true);
+        }
+
+        public GameObject CreateOfflineGravityBombDeviceInstance()
+        {
+            return CreateGravityBombDevicePrefab(false, false);
         }
 
         public GameObject CreateChronoDomeFieldInstance()
         {
-            return CreateChronoDomeFieldPrefab(false);
+            return CreateChronoDomeFieldPrefab(false, true);
+        }
+
+        public GameObject CreateOfflineChronoDomeFieldInstance()
+        {
+            return CreateChronoDomeFieldPrefab(false, false);
         }
 
         public GameObject CreateMatchManagerInstance()
@@ -1054,29 +1206,55 @@ namespace RetrowaveRocket
 
         private void EnsureGameplayEventSystem()
         {
-            var eventSystem = FindFirstObjectByType<EventSystem>();
+            var eventSystem = FindAnyObjectByType<EventSystem>();
 
             if (eventSystem == null)
             {
                 _gameplayMenuEventSystem = new GameObject("Gameplay EventSystem", typeof(EventSystem), typeof(InputSystemUIInputModule));
                 _gameplayMenuEventSystem.transform.SetParent(transform, false);
-                _gameplayMenuEventSystem.GetComponent<InputSystemUIInputModule>().AssignDefaultActions();
-                return;
+                eventSystem = _gameplayMenuEventSystem.GetComponent<EventSystem>();
             }
 
-            var legacyModule = eventSystem.GetComponent<StandaloneInputModule>();
+            eventSystem.sendNavigationEvents = true;
             var inputSystemModule = eventSystem.GetComponent<InputSystemUIInputModule>();
 
             if (inputSystemModule == null)
             {
                 inputSystemModule = eventSystem.gameObject.AddComponent<InputSystemUIInputModule>();
-                inputSystemModule.AssignDefaultActions();
             }
+
+            inputSystemModule.AssignDefaultActions();
+            inputSystemModule.enabled = true;
+            eventSystem.enabled = true;
+            eventSystem.gameObject.SetActive(true);
+
+            var legacyModule = eventSystem.GetComponent<StandaloneInputModule>();
 
             if (legacyModule != null)
             {
-                Destroy(legacyModule);
+                legacyModule.enabled = false;
             }
+
+        }
+
+        private EventSystem GetInteractiveGameplayEventSystem()
+        {
+            var eventSystems = FindObjectsByType<EventSystem>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+
+            for (var i = 0; i < eventSystems.Length; i++)
+            {
+                var eventSystem = eventSystems[i];
+
+                if (eventSystem != null
+                    && eventSystem.isActiveAndEnabled
+                    && eventSystem.currentInputModule != null
+                    && eventSystem.gameObject.activeInHierarchy)
+                {
+                    return eventSystem;
+                }
+            }
+
+            return null;
         }
 
         private void RefreshGameplayMenuState()
@@ -3627,6 +3805,7 @@ namespace RetrowaveRocket
 
         private void OpenGameplaySettingsOverlay()
         {
+            EnsureGameplayEventSystem();
             EnsureGameplaySettingsOverlay();
 
             if (_gameplaySettingsRoot == null)
@@ -3640,6 +3819,17 @@ namespace RetrowaveRocket
             _gameplaySettingsRoot.transform.SetAsLastSibling();
             RebuildGameplaySettingsContent();
             RefreshGameplaySettingsStatus();
+            Cursor.visible = true;
+            Cursor.lockState = CursorLockMode.None;
+
+            var eventSystem = GetInteractiveGameplayEventSystem();
+
+            if (eventSystem != null)
+            {
+                eventSystem.SetSelectedGameObject(_gameplaySettingsCloseButton != null
+                    ? _gameplaySettingsCloseButton.gameObject
+                    : _gameplaySettingsRoot);
+            }
         }
 
         private void CloseGameplaySettingsOverlay()
@@ -3665,6 +3855,7 @@ namespace RetrowaveRocket
             _gameplaySettingsPanelRect = null;
             _gameplaySettingsContentHost = null;
             _gameplaySettingsStatusText = null;
+            _gameplaySettingsCloseButton = null;
             _gameplaySettingsTabImages.Clear();
             _gameplaySettingsBindingValueTexts.Clear();
             _pendingGameplaySettingsBindingAction = null;
@@ -3720,8 +3911,8 @@ namespace RetrowaveRocket
             _gameplaySettingsStatusText = CreateSettingsText(panel.transform, "Status", string.Empty, 16f, FontStyles.Normal, TextAlignmentOptions.Left, new Color(0.58f, 0.86f, 1f, 1f));
             SetRect(_gameplaySettingsStatusText.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(36f, -82f), new Vector2(760f, 30f), new Vector2(0f, 1f));
 
-            var closeButton = CreateSettingsButton(panel.transform, "CloseButton", "Back", new Color(0.14f, 0.22f, 0.38f, 0.96f), CloseGameplaySettingsOverlay);
-            SetRect(closeButton.GetComponent<RectTransform>(), new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-34f, -32f), new Vector2(150f, 42f), new Vector2(1f, 1f));
+            _gameplaySettingsCloseButton = CreateSettingsButton(panel.transform, "CloseButton", "Back", new Color(0.14f, 0.22f, 0.38f, 0.96f), CloseGameplaySettingsOverlay);
+            SetRect(_gameplaySettingsCloseButton.GetComponent<RectTransform>(), new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-34f, -32f), new Vector2(150f, 42f), new Vector2(1f, 1f));
 
             CreateGameplaySettingsTabButton(panel.transform, GameplaySettingsTab.Game, "Game", new Vector2(-480f, 204f));
             CreateGameplaySettingsTabButton(panel.transform, GameplaySettingsTab.Controls, "Controls", new Vector2(-480f, 132f));
@@ -3872,6 +4063,19 @@ namespace RetrowaveRocket
             CreateSettingsSection(content, "Game");
             CreateSettingsToggleRow(content, "Show HUD", RetrowaveGameSettings.ShowHud, value => RetrowaveGameSettings.SetShowHud(value));
             CreateSettingsSliderRow(content, "Music Volume", RetrowaveGameSettings.MusicVolume, RetrowaveGameSettings.SetMusicVolume);
+
+            if (IsTestArenaScene(SceneManager.GetActiveScene()))
+            {
+                CreateSettingsNote(content, "Esc closes this panel in Test Arena. Use the button below to leave the arena.");
+                var returnButton = CreateSettingsButton(content, "ReturnToMainMenu", "Return To Main Menu", new Color(0.26f, 0.12f, 0.16f, 0.98f), () =>
+                {
+                    CloseGameplaySettingsOverlay();
+                    ReturnToMainMenu();
+                });
+                returnButton.gameObject.GetComponent<LayoutElement>().preferredHeight = 46f;
+                returnButton.gameObject.GetComponent<LayoutElement>().preferredWidth = 260f;
+            }
+
             CreateSettingsNote(content, "These settings apply immediately and carry back to the main menu.");
         }
 
@@ -3893,6 +4097,7 @@ namespace RetrowaveRocket
             CreateSettingsToggleRow(content, "Motion Blur", RetrowaveGameSettings.MotionBlur, value => RetrowaveGameSettings.SetMotionBlur(value));
             CreateSettingsChoiceRow(content, "Shadow Quality", new[] { "Off", "Low", "High" }, (int)RetrowaveGameSettings.ShadowQuality, index => RetrowaveGameSettings.SetShadowQuality((RetrowaveShadowQuality)index));
             CreateSettingsChoiceRow(content, "Texture Quality", new[] { "Low", "Med", "High" }, (int)RetrowaveGameSettings.TextureQuality, index => RetrowaveGameSettings.SetTextureQuality((RetrowaveTextureQuality)index));
+            CreateSettingsChoiceRow(content, "VFX Density", new[] { "Low", "Med", "High" }, (int)RetrowaveGameSettings.VfxDensity, index => RetrowaveGameSettings.SetVfxDensity((RetrowaveVfxDensity)index));
             CreateSettingsChoiceRow(content, "Camera Effects", new[] { "Clean", "Retro", "Cinema", "Neon" }, (int)RetrowaveGameSettings.CameraEffectPreset, index => RetrowaveGameSettings.SetCameraEffectPreset((RetrowaveCameraEffectPreset)index));
         }
 
@@ -4991,7 +5196,7 @@ namespace RetrowaveRocket
 
         private void ShutdownSession()
         {
-            ForceShutdownSession(true, true);
+            ForceShutdownSession(false, false);
         }
 
         private bool TryParsePort(string portText, out ushort port)
@@ -5041,8 +5246,30 @@ namespace RetrowaveRocket
 
             if (!started)
             {
-                ForceShutdownSession(true, false);
+                ForceShutdownSession(false, false);
             }
+        }
+
+        private IEnumerator LoadTestArena()
+        {
+            _showPauseMenu = false;
+            _showScoreboard = false;
+            ClearPendingRoleSelectionRequest();
+            ClearGoalCelebrationState();
+            ClearPodiumPresentation();
+
+            if (!IsTestArenaScene(SceneManager.GetActiveScene()))
+            {
+                SceneManager.LoadScene(TestArenaSceneName, LoadSceneMode.Single);
+            }
+
+            while (!IsTestArenaScene(SceneManager.GetActiveScene()))
+            {
+                yield return null;
+            }
+
+            yield return null;
+            ApplyScenePresentation(SceneManager.GetActiveScene());
         }
 
         private void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
@@ -5195,6 +5422,8 @@ namespace RetrowaveRocket
                 TearDownNetworkRuntime();
                 RetrowavePlayerController.ClearLocalOwner();
                 RetrowaveCameraRig.ShowOverview();
+                _address = ResolvePreferredAddress();
+                _port = 7777;
 
                 if (rebuildRuntime)
                 {
@@ -5209,33 +5438,15 @@ namespace RetrowaveRocket
 
         private void TearDownNetworkRuntime()
         {
-            if (_networkManager != null)
+            if (_networkManager == null)
             {
-                _networkManager.OnServerStarted -= HandleServerStarted;
-                _networkManager.OnClientConnectedCallback -= HandleNetworkClientConnected;
-                _networkManager.OnClientDisconnectCallback -= HandleNetworkClientDisconnected;
-
-                if (_networkManager.IsListening)
-                {
-                    _networkManager.Shutdown();
-                }
+                return;
             }
 
-            if (_networkRuntimeRoot != null)
+            if (_networkManager.IsListening)
             {
-                if (Application.isPlaying)
-                {
-                    Destroy(_networkRuntimeRoot);
-                }
-                else
-                {
-                    DestroyImmediate(_networkRuntimeRoot);
-                }
+                _networkManager.Shutdown();
             }
-
-            _networkRuntimeRoot = null;
-            _networkManager = null;
-            _transport = null;
         }
 
         private void ApplyScenePresentation(Scene scene)
@@ -5248,6 +5459,20 @@ namespace RetrowaveRocket
                 RetrowaveCameraRig.ShowOverview();
                 EnsureGameplayMenuOverlay();
                 EnsureGameplayHudOverlay();
+                return;
+            }
+
+            if (IsTestArenaScene(scene))
+            {
+                RetrowaveArenaBuilder.EnsureBuilt();
+                RetrowaveArenaBuilder.SetActive(true);
+                RetrowaveCameraRig.EnsureCamera();
+                RetrowaveCameraRig.ShowOverview();
+                ClearPodiumPresentation();
+                DestroyGameplayMenuOverlay();
+                DestroyGameplaySettingsOverlay();
+                DestroyGameplayHudOverlay();
+                RetrowaveTestArenaManager.Ensure(scene);
                 return;
             }
 
@@ -5283,7 +5508,12 @@ namespace RetrowaveRocket
             return scene.name == GameplaySceneName;
         }
 
-        private static GameObject CreatePlayerPrefab(bool isTemplate = true)
+        private static bool IsTestArenaScene(Scene scene)
+        {
+            return scene.name == TestArenaSceneName;
+        }
+
+        private static GameObject CreatePlayerPrefab(bool isTemplate = true, bool includeNetworking = true)
         {
             var prefab = new GameObject("RT Player Cube");
             prefab.name = "RT Player Cube";
@@ -5311,10 +5541,14 @@ namespace RetrowaveRocket
                 frictionCombine = PhysicsMaterialCombine.Minimum,
             };
 
-            prefab.AddComponent<NetworkObject>();
-            ConfigurePhysicsNetworkTransform(prefab.AddComponent<NetworkTransform>());
-            var networkRigidbody = prefab.AddComponent<NetworkRigidbody>();
-            networkRigidbody.UseRigidBodyForMotion = true;
+            if (includeNetworking)
+            {
+                prefab.AddComponent<NetworkObject>();
+                ConfigurePhysicsNetworkTransform(prefab.AddComponent<NetworkTransform>());
+                var networkRigidbody = prefab.AddComponent<NetworkRigidbody>();
+                networkRigidbody.UseRigidBodyForMotion = true;
+            }
+
             prefab.AddComponent<VehicleStatusEffects>();
             prefab.AddComponent<VehicleOverdriveSystem>();
             prefab.AddComponent<VehicleStyleMeter>();
@@ -5335,7 +5569,7 @@ namespace RetrowaveRocket
             return prefab;
         }
 
-        private static GameObject CreateBallPrefab(bool isTemplate = true)
+        private static GameObject CreateBallPrefab(bool isTemplate = true, bool includeNetworking = true)
         {
             var prefab = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             prefab.name = "RT Ball";
@@ -5360,10 +5594,14 @@ namespace RetrowaveRocket
             };
             collider.material = material;
 
-            prefab.AddComponent<NetworkObject>();
-            ConfigurePhysicsNetworkTransform(prefab.AddComponent<NetworkTransform>());
-            var networkRigidbody = prefab.AddComponent<NetworkRigidbody>();
-            networkRigidbody.UseRigidBodyForMotion = true;
+            if (includeNetworking)
+            {
+                prefab.AddComponent<NetworkObject>();
+                ConfigurePhysicsNetworkTransform(prefab.AddComponent<NetworkTransform>());
+                var networkRigidbody = prefab.AddComponent<NetworkRigidbody>();
+                networkRigidbody.UseRigidBodyForMotion = true;
+            }
+
             prefab.AddComponent<RetrowaveBallStateController>();
             prefab.AddComponent<RetrowaveBall>();
             prefab.GetComponent<MeshRenderer>().sharedMaterial = CreateBallSurfaceMaterial();
@@ -5472,7 +5710,7 @@ namespace RetrowaveRocket
             }
         }
 
-        private static GameObject CreatePowerUpPrefab(bool isTemplate = true)
+        private static GameObject CreatePowerUpPrefab(bool isTemplate = true, bool includeNetworking = true)
         {
             var prefab = GameObject.CreatePrimitive(PrimitiveType.Cube);
             prefab.name = "RT PowerUp";
@@ -5483,8 +5721,12 @@ namespace RetrowaveRocket
             collider.isTrigger = true;
             collider.size = Vector3.one * 1.7f;
 
-            prefab.AddComponent<NetworkObject>();
-            prefab.AddComponent<NetworkTransform>();
+            if (includeNetworking)
+            {
+                prefab.AddComponent<NetworkObject>();
+                prefab.AddComponent<NetworkTransform>();
+            }
+
             prefab.AddComponent<RetrowavePowerUp>();
             prefab.GetComponent<MeshRenderer>().sharedMaterial = RetrowaveStyle.CreateLitMaterial(
                 new Color(0.18f, 0.14f, 0.28f),
@@ -5495,57 +5737,77 @@ namespace RetrowaveRocket
             return prefab;
         }
 
-        private static GameObject CreateRarePowerUpPickupBeaconPrefab(bool isTemplate = true)
+        private static GameObject CreateRarePowerUpPickupBeaconPrefab(bool isTemplate = true, bool includeNetworking = true)
         {
             var prefab = new GameObject("RT Rare PowerUp Beacon");
             prefab.SetActive(false);
             var collider = prefab.AddComponent<SphereCollider>();
             collider.isTrigger = true;
             collider.radius = 3f;
-            prefab.AddComponent<NetworkObject>();
-            prefab.AddComponent<NetworkTransform>();
+
+            if (includeNetworking)
+            {
+                prefab.AddComponent<NetworkObject>();
+                prefab.AddComponent<NetworkTransform>();
+            }
+
             prefab.AddComponent<RarePowerUpPickupBeacon>();
             FinalizeRuntimePrefab(prefab, 0xA1000005u, isTemplate);
             return prefab;
         }
 
-        private static GameObject CreateNeonTrailSegmentPrefab(bool isTemplate = true)
+        private static GameObject CreateNeonTrailSegmentPrefab(bool isTemplate = true, bool includeNetworking = true)
         {
             var prefab = new GameObject("RT Neon Trail Segment");
             prefab.SetActive(false);
             var collider = prefab.AddComponent<BoxCollider>();
             collider.isTrigger = true;
             collider.size = new Vector3(1.85f, 1.4f, 1.35f);
-            prefab.AddComponent<NetworkObject>();
-            prefab.AddComponent<NetworkTransform>();
+
+            if (includeNetworking)
+            {
+                prefab.AddComponent<NetworkObject>();
+                prefab.AddComponent<NetworkTransform>();
+            }
+
             prefab.AddComponent<NeonTrailSegment>();
             FinalizeRuntimePrefab(prefab, 0xA1000006u, isTemplate);
             return prefab;
         }
 
-        private static GameObject CreateGravityBombDevicePrefab(bool isTemplate = true)
+        private static GameObject CreateGravityBombDevicePrefab(bool isTemplate = true, bool includeNetworking = true)
         {
             var prefab = new GameObject("RT Gravity Bomb Device");
             prefab.SetActive(false);
             var collider = prefab.AddComponent<SphereCollider>();
             collider.isTrigger = true;
             collider.radius = 9f;
-            prefab.AddComponent<NetworkObject>();
-            prefab.AddComponent<NetworkTransform>();
+
+            if (includeNetworking)
+            {
+                prefab.AddComponent<NetworkObject>();
+                prefab.AddComponent<NetworkTransform>();
+            }
+
             prefab.AddComponent<GravityBombDevice>();
             FinalizeRuntimePrefab(prefab, 0xA1000007u, isTemplate);
             return prefab;
         }
 
-        private static GameObject CreateChronoDomeFieldPrefab(bool isTemplate = true)
+        private static GameObject CreateChronoDomeFieldPrefab(bool isTemplate = true, bool includeNetworking = true)
         {
             var prefab = new GameObject("RT Chrono Dome Field");
             prefab.SetActive(false);
             var collider = prefab.AddComponent<SphereCollider>();
             collider.isTrigger = true;
             collider.radius = 10f;
-            prefab.AddComponent<NetworkObject>();
-            prefab.AddComponent<NetworkTransform>();
+
+            if (includeNetworking)
+            {
+                prefab.AddComponent<NetworkObject>();
+                prefab.AddComponent<NetworkTransform>();
+            }
+
             prefab.AddComponent<ChronoDomeField>();
             FinalizeRuntimePrefab(prefab, 0xA1000008u, isTemplate);
             return prefab;

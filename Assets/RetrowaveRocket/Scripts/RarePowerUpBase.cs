@@ -12,8 +12,8 @@ namespace RetrowaveRocket
         protected static bool IsValidOwner(RetrowavePlayerController owner)
         {
             return owner != null
-                   && owner.IsSpawned
-                   && owner.IsServer
+                   && owner.IsRuntimeActive
+                   && owner.HasSimulationAuthority
                    && owner.IsArenaParticipant
                    && owner.Body != null;
         }

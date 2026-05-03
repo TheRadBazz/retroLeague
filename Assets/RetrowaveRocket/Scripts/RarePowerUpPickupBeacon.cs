@@ -63,6 +63,8 @@ namespace RetrowaveRocket
         private RarePowerUpSpawner _spawner;
         private RetrowavePlayerController _capturingPlayer;
         private float _captureTimer;
+        private bool _offlineMode;
+        private bool HasSimulationAuthority => IsServer || _offlineMode;
 
         public static event Action<RarePowerUpPickupBeacon, bool, RetrowaveRarePowerUpType> BeaconStateChanged;
 
@@ -79,6 +81,7 @@ namespace RetrowaveRocket
             _trigger = GetComponent<SphereCollider>();
             _trigger.isTrigger = true;
             EnsureVisuals();
+            RefreshVisuals();
         }
 
         public override void OnNetworkSpawn()
@@ -147,7 +150,7 @@ namespace RetrowaveRocket
 
         private void FixedUpdate()
         {
-            if (!IsServer || !_active.Value)
+            if (!HasSimulationAuthority || !_active.Value)
             {
                 return;
             }
@@ -181,6 +184,13 @@ namespace RetrowaveRocket
             }
         }
 
+        public void EnableOfflineMode()
+        {
+            _offlineMode = true;
+            RegisterActiveBeacon();
+            RefreshVisuals();
+        }
+
         public void InitializeServer(
             RarePowerUpSpawner spawner,
             RetrowaveRarePowerUpType type,
@@ -210,9 +220,39 @@ namespace RetrowaveRocket
             AnnounceSpawnClientRpc();
         }
 
+        public void InitializeOffline(
+            RarePowerUpSpawner spawner,
+            RetrowaveRarePowerUpType type,
+            bool requireCapture,
+            float captureSeconds,
+            bool allowReplacement,
+            float radius)
+        {
+            _offlineMode = true;
+            _spawner = spawner;
+            _heldType.Value = (int)type;
+            _requireCapture = requireCapture;
+            _captureSeconds = Mathf.Max(0.05f, captureSeconds);
+            _allowReplacement = allowReplacement;
+            _radius = Mathf.Max(0.5f, radius);
+            _requiresCapture.Value = requireCapture;
+            _syncedRadius.Value = _radius;
+            _active.Value = true;
+            _captureProgress.Value = requireCapture ? 0f : 1f;
+            _capturingClientId.Value = ulong.MaxValue;
+            _trigger.radius = _radius;
+            RegisterActiveBeacon();
+            RefreshVisuals();
+
+            if (_spawnCue != null)
+            {
+                RetrowaveArenaAudio.PlayRarePowerCue(_spawnCue, transform.position, 0.92f);
+            }
+        }
+
         private void OnTriggerEnter(Collider other)
         {
-            if (!IsServer || !_active.Value || !TryResolvePlayer(other, out var player))
+            if (!HasSimulationAuthority || !_active.Value || !TryResolvePlayer(other, out var player))
             {
                 return;
             }
@@ -230,7 +270,7 @@ namespace RetrowaveRocket
 
         private void OnTriggerExit(Collider other)
         {
-            if (!IsServer || !TryResolvePlayer(other, out var player))
+            if (!HasSimulationAuthority || !TryResolvePlayer(other, out var player))
             {
                 return;
             }
@@ -280,7 +320,7 @@ namespace RetrowaveRocket
 
         private bool IsEligible(RetrowavePlayerController player)
         {
-            if (player == null || !player.IsSpawned || !player.IsArenaParticipant)
+            if (player == null || !player.IsRuntimeActive || !player.IsArenaParticipant)
             {
                 return false;
             }
@@ -310,9 +350,26 @@ namespace RetrowaveRocket
 
             _active.Value = false;
             _trigger.enabled = false;
-            PlayCollectedClientRpc();
             _spawner?.HandleBeaconResolvedServer(this);
-            NetworkObject.Despawn(true);
+
+            if (_offlineMode)
+            {
+                if (_collectedCue != null)
+                {
+                    RetrowaveArenaAudio.PlayRarePowerCue(_collectedCue, transform.position, 1f);
+                }
+
+                RetrowaveArenaAudio.PlayCrowdCheer(RetrowaveCrowdCheerIntensity.Soft, transform.position, 0.36f);
+                ActiveBeacons.Remove(this);
+                BeaconStateChanged?.Invoke(this, false, HeldType);
+                Destroy(gameObject);
+            }
+            else
+            {
+                PlayCollectedClientRpc();
+                NetworkObject.Despawn(true);
+            }
+
             return true;
         }
 

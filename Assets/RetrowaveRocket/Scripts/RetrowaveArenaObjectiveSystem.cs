@@ -60,6 +60,8 @@ namespace RetrowaveRocket
         private float _pulseStartedAt = -10f;
         private float _pulseDuration = 0.58f;
         private int _lastProgressPulseBucket;
+        private bool _offlineMode;
+        private bool HasSimulationAuthority => IsServer || _offlineMode;
 
         public RetrowaveArenaObjectiveType ActiveObjectiveType => ActiveType;
         public float CaptureProgressNormalized => Mathf.Clamp01(_captureProgress.Value);
@@ -98,9 +100,33 @@ namespace RetrowaveRocket
             base.OnNetworkDespawn();
         }
 
+        public void EnableOfflineMode()
+        {
+            _offlineMode = true;
+            ScheduleNextObjectiveServer();
+            RefreshVisuals();
+        }
+
+        public void ConfigureOfflineFreeplay(
+            float minDelaySeconds = 10f,
+            float maxDelaySeconds = 18f,
+            float activeDurationSeconds = 22f,
+            float captureSeconds = 3.25f,
+            bool spawnImmediately = true)
+        {
+            _offlineMode = true;
+            _spawnDelayRange = new Vector2(
+                Mathf.Max(3f, Mathf.Min(minDelaySeconds, maxDelaySeconds)),
+                Mathf.Max(minDelaySeconds, maxDelaySeconds));
+            _activeDuration = Mathf.Max(6f, activeDurationSeconds);
+            _captureSeconds = Mathf.Max(0.5f, captureSeconds);
+            _nextObjectiveAt = spawnImmediately ? Time.time + 2f : Time.time + Random.Range(_spawnDelayRange.x, _spawnDelayRange.y);
+            RefreshVisuals();
+        }
+
         private void FixedUpdate()
         {
-            if (!IsServer)
+            if (!HasSimulationAuthority)
             {
                 return;
             }
@@ -149,7 +175,7 @@ namespace RetrowaveRocket
 
         public void ResetForMatchStartServer()
         {
-            if (!IsServer)
+            if (!HasSimulationAuthority)
             {
                 return;
             }
@@ -244,7 +270,17 @@ namespace RetrowaveRocket
                 player.AwardStyleServer(RetrowaveStyleEvent.ObjectiveCapture, activeType == RetrowaveArenaObjectiveType.WallGate ? 1.2f : 1f);
             }
 
-            ObjectiveCapturedClientRpc(_objectivePosition.Value, (int)activeType, (int)capturingTeam);
+            if (_offlineMode)
+            {
+                var objectiveColor = RetrowaveArenaObjectiveCatalog.GetColor(activeType);
+                var teamColor = capturingTeam == RetrowaveTeam.Blue ? RetrowaveStyle.BlueGlow : RetrowaveStyle.PinkGlow;
+                StartCapturePulse(_objectivePosition.Value, Color.Lerp(objectiveColor, teamColor, 0.72f), playAudio: true);
+            }
+            else
+            {
+                ObjectiveCapturedClientRpc(_objectivePosition.Value, (int)activeType, (int)capturingTeam);
+            }
+
             DeactivateObjectiveServer(scheduleNext: true);
         }
 
@@ -396,6 +432,11 @@ namespace RetrowaveRocket
 
         private bool CanRunDuringPhase(RetrowaveMatchManager matchManager)
         {
+            if (_offlineMode && matchManager == null)
+            {
+                return true;
+            }
+
             return matchManager.IsLiveMatch || (_spawnDuringWarmup && matchManager.IsWarmup);
         }
 

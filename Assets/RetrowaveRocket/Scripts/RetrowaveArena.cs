@@ -1490,13 +1490,14 @@ namespace RetrowaveRocket
 
         private void OnTriggerEnter(Collider other)
         {
-            if (!NetworkManager.Singleton || !NetworkManager.Singleton.IsServer)
+            if (!other.TryGetComponent<RetrowaveBall>(out _))
             {
                 return;
             }
 
-            if (!other.TryGetComponent<RetrowaveBall>(out _))
+            if (!NetworkManager.Singleton || !NetworkManager.Singleton.IsServer)
             {
+                RetrowaveTestArenaManager.Instance?.HandleOfflineGoal(Team);
                 return;
             }
 

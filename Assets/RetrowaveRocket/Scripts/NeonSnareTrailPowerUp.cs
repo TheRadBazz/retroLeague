@@ -41,26 +41,42 @@ namespace RetrowaveRocket
             _player = owner;
             _activationSerial++;
             _activeRoutine = StartCoroutine(TrailRoutine(owner, _activationSerial));
-            StartTrailVisualClientRpc(new NetworkObjectReference(owner.NetworkObject), _activeDuration);
+
+            if (owner.IsOfflineMode)
+            {
+                StartCoroutine(TrailVisualRoutine(owner.transform, _activeDuration));
+
+                if (_activateCue != null)
+                {
+                    RetrowaveArenaAudio.PlayRarePowerCue(_activateCue, owner.transform.position, 1f);
+                }
+            }
+            else
+            {
+                StartTrailVisualClientRpc(new NetworkObjectReference(owner.NetworkObject), _activeDuration);
+            }
+
             return true;
         }
 
         private IEnumerator TrailRoutine(RetrowavePlayerController owner, uint activationSerial)
         {
             var endsAt = Time.time + Mathf.Max(0.25f, _activeDuration);
+            var density = RetrowaveGameSettings.VfxDensityMultiplier;
+            var segmentSpawnDistance = Mathf.Max(_segmentSpawnDistance, _segmentSpawnDistance / Mathf.Max(0.35f, density));
             var lastSegmentPosition = owner.transform.position;
             var sourceId = ((ulong)owner.OwnerClientId << 32) ^ activationSerial;
 
-            SpawnSegment(owner, lastSegmentPosition, owner.transform.rotation, sourceId, _segmentSpawnDistance);
+            SpawnSegment(owner, lastSegmentPosition, owner.transform.rotation, sourceId, segmentSpawnDistance);
 
-            while (Time.time < endsAt && owner != null && owner.IsSpawned && owner.IsArenaParticipant)
+            while (Time.time < endsAt && owner != null && owner.IsRuntimeActive && owner.IsArenaParticipant)
             {
                 var currentPosition = owner.transform.position;
                 var delta = currentPosition - lastSegmentPosition;
                 delta.y = 0f;
                 var distance = delta.magnitude;
 
-                if (distance >= _segmentSpawnDistance)
+                if (distance >= segmentSpawnDistance)
                 {
                     var rotation = delta.sqrMagnitude > 0.001f
                         ? Quaternion.LookRotation(delta.normalized, Vector3.up)
@@ -82,7 +98,9 @@ namespace RetrowaveRocket
                 return;
             }
 
-            var segmentObject = RetrowaveGameBootstrap.Instance.CreateNeonTrailSegmentInstance();
+            var segmentObject = owner.IsOfflineMode
+                ? RetrowaveGameBootstrap.Instance.CreateOfflineNeonTrailSegmentInstance()
+                : RetrowaveGameBootstrap.Instance.CreateNeonTrailSegmentInstance();
 
             if (segmentObject == null)
             {
@@ -94,29 +112,55 @@ namespace RetrowaveRocket
             segmentObject.transform.SetPositionAndRotation(spawnPosition, rotation);
             RetrowaveGameBootstrap.Instance.MoveRuntimeInstanceToGameplayScene(segmentObject);
 
-            var networkObject = segmentObject.GetComponent<NetworkObject>();
             var segment = segmentObject.GetComponent<NeonTrailSegment>();
 
-            if (networkObject == null || segment == null)
+            if (segment == null)
             {
                 Destroy(segmentObject);
                 return;
             }
 
-            networkObject.Spawn();
             var size = _segmentColliderSize;
             size.z = Mathf.Max(size.z, length + _segmentColliderSize.z);
-            segment.InitializeServer(
-                owner.OwnerClientId,
-                owner.Team,
-                sourceId,
-                size,
-                _segmentLifetime,
-                _stunDuration * owner.StatusEffectDurationMultiplier,
-                _stunImmunitySeconds,
-                _spinTorque,
-                _affectEnemiesOnly,
-                _affectOwner);
+
+            if (owner.IsOfflineMode)
+            {
+                segment.EnableOfflineMode();
+                segment.InitializeOffline(
+                    owner.ControllingClientId,
+                    owner.Team,
+                    sourceId,
+                    size,
+                    _segmentLifetime,
+                    _stunDuration * owner.StatusEffectDurationMultiplier,
+                    _stunImmunitySeconds,
+                    _spinTorque,
+                    _affectEnemiesOnly,
+                    _affectOwner);
+            }
+            else
+            {
+                var networkObject = segmentObject.GetComponent<NetworkObject>();
+
+                if (networkObject == null)
+                {
+                    Destroy(segmentObject);
+                    return;
+                }
+
+                networkObject.Spawn();
+                segment.InitializeServer(
+                    owner.OwnerClientId,
+                    owner.Team,
+                    sourceId,
+                    size,
+                    _segmentLifetime,
+                    _stunDuration * owner.StatusEffectDurationMultiplier,
+                    _stunImmunitySeconds,
+                    _spinTorque,
+                    _affectEnemiesOnly,
+                    _affectOwner);
+            }
         }
 
         [ClientRpc]
@@ -143,9 +187,9 @@ namespace RetrowaveRocket
             trailObject.transform.SetParent(owner, false);
             trailObject.transform.localPosition = new Vector3(0f, -0.65f, -0.95f);
             var trail = trailObject.AddComponent<TrailRenderer>();
-            trail.time = Mathf.Max(0.2f, _segmentLifetime);
+            trail.time = Mathf.Max(0.2f, _segmentLifetime * Mathf.Lerp(0.75f, 1f, RetrowaveGameSettings.VfxDensityMultiplier));
             trail.minVertexDistance = 0.12f;
-            trail.widthMultiplier = Mathf.Max(0.05f, _trailVisualWidth);
+            trail.widthMultiplier = Mathf.Max(0.05f, _trailVisualWidth * Mathf.Lerp(0.78f, 1f, RetrowaveGameSettings.VfxDensityMultiplier));
             trail.numCornerVertices = 4;
             trail.numCapVertices = 4;
             trail.material = RetrowaveStyle.CreateTransparentUnlitMaterial(new Color(0.08f, 1f, 0.25f, 0.92f));

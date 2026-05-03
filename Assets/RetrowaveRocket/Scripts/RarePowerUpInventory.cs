@@ -25,6 +25,8 @@ namespace RetrowaveRocket
         public RetrowaveRarePowerUpType HeldType => (RetrowaveRarePowerUpType)_heldType.Value;
         public bool HasHeldPowerUp => HeldType != RetrowaveRarePowerUpType.None;
         public bool AllowReplacement => _allowReplacement;
+        private bool HasInputAuthority => IsOwner || (_player != null && _player.IsOfflineMode);
+        private bool HasSimulationAuthority => IsServer || (_player != null && _player.IsOfflineMode);
 
         private void Awake()
         {
@@ -47,7 +49,7 @@ namespace RetrowaveRocket
 
         private void Update()
         {
-            if (!IsOwner || !IsSpawned || !HasHeldPowerUp || _player == null || !_player.IsArenaParticipant)
+            if (!HasInputAuthority || _player == null || !_player.IsRuntimeActive || !HasHeldPowerUp || !_player.IsArenaParticipant)
             {
                 return;
             }
@@ -74,13 +76,20 @@ namespace RetrowaveRocket
 
             if (activatePressed)
             {
-                RequestActivateRarePowerUpServerRpc();
+                if (_player.IsOfflineMode)
+                {
+                    TryActivateLocal();
+                }
+                else
+                {
+                    RequestActivateRarePowerUpServerRpc();
+                }
             }
         }
 
         public bool CanAcceptServer(RetrowaveRarePowerUpType type, bool allowReplacementOverride)
         {
-            return IsServer
+            return HasSimulationAuthority
                    && type != RetrowaveRarePowerUpType.None
                    && (!HasHeldPowerUp || _allowReplacement || allowReplacementOverride);
         }
@@ -98,7 +107,7 @@ namespace RetrowaveRocket
 
         public void ClearServer()
         {
-            if (!IsServer)
+            if (!HasSimulationAuthority)
             {
                 return;
             }
@@ -110,6 +119,30 @@ namespace RetrowaveRocket
         private void RequestActivateRarePowerUpServerRpc()
         {
             if (!IsServer || _player == null || !_player.IsArenaParticipant)
+            {
+                return;
+            }
+
+            var heldType = HeldType;
+
+            if (heldType == RetrowaveRarePowerUpType.None)
+            {
+                return;
+            }
+
+            var powerUp = ResolvePowerUp(heldType);
+
+            if (powerUp == null || !powerUp.ActivateServer(_player))
+            {
+                return;
+            }
+
+            _heldType.Value = (int)RetrowaveRarePowerUpType.None;
+        }
+
+        private void TryActivateLocal()
+        {
+            if (!HasSimulationAuthority || _player == null || !_player.IsArenaParticipant)
             {
                 return;
             }

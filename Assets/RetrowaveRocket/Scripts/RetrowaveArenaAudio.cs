@@ -149,7 +149,9 @@ namespace RetrowaveRocket
 
         private void Update()
         {
-            var targetSceneActive = SceneManager.GetActiveScene().name == RetrowaveGameBootstrap.GameplaySceneName;
+            var activeSceneName = SceneManager.GetActiveScene().name;
+            var targetSceneActive = activeSceneName == RetrowaveGameBootstrap.GameplaySceneName
+                                    || activeSceneName == RetrowaveGameBootstrap.TestArenaSceneName;
             var targetVolume = targetSceneActive ? RetrowaveGameSettings.MusicVolume : 0f;
             UpdateLoopSource(_ambienceSource, _ambienceLoop, targetVolume * _ambienceVolume);
             UpdateLoopSource(_cheerBedSource, _cheeringAmbienceLoop, targetVolume * _cheerBedVolume);

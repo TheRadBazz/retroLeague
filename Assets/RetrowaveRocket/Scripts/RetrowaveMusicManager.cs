@@ -111,6 +111,11 @@ namespace RetrowaveRocket
                 return RetrowaveMusicContext.MainMenu;
             }
 
+            if (activeScene.name == RetrowaveGameBootstrap.TestArenaSceneName)
+            {
+                return RetrowaveMusicContext.WarmupLobby;
+            }
+
             if (activeScene.name != RetrowaveGameBootstrap.GameplaySceneName)
             {
                 return RetrowaveMusicContext.None;

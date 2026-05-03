@@ -20,6 +20,13 @@ namespace RetrowaveRocket
             Host = 1,
         }
 
+        private enum PlayTab
+        {
+            Multiplayer = 0,
+            LocalMultiplayer = 1,
+            TestingArena = 2,
+        }
+
         private static readonly int[] RoundDurationOptions = { 60, 90, 120, 180, 240, 300, 420, 600, 900 };
         private static readonly int[] RoundCountOptions = { 1, 2, 3, 5, 7, 9, 12 };
         private static readonly int[] MaxPlayerOptions = { 2, 4, 6, 8, 10, 12, 16, 20, 24, 28, 32, 36, 40 };
@@ -43,13 +50,21 @@ namespace RetrowaveRocket
         private TMP_InputField _hostNameField;
         private TMP_InputField _hostAddressField;
         private TMP_InputField _hostPortField;
+        private TMP_InputField _testNameField;
         private TMP_Text _roundDurationValueText;
         private TMP_Text _roundCountValueText;
         private TMP_Text _maxPlayersValueText;
         private TMP_Text _arenaSizeValueText;
         private TMP_Text _hostSummaryText;
+        private TMP_Text _testSummaryText;
         private TMP_Text _statusText;
         private TMP_Text _scrollHintText;
+        private Button _multiplayerTabButton;
+        private Button _localMultiplayerTabButton;
+        private Button _testingArenaTabButton;
+        private Image _multiplayerTabImage;
+        private Image _localMultiplayerTabImage;
+        private Image _testingArenaTabImage;
         private Button _joinTabButton;
         private Button _hostTabButton;
         private Image _joinTabImage;
@@ -60,8 +75,12 @@ namespace RetrowaveRocket
         private GameObject _screenCanvasRoot;
         private ScrollRect _contentScrollRect;
         private Scrollbar _contentScrollbar;
+        private GameObject _localConnectionTabRow;
+        private GameObject _multiplayerPanel;
         private GameObject _joinPanel;
         private GameObject _hostPanel;
+        private GameObject _testingArenaPanel;
+        private PlayTab _activePlayTab = PlayTab.LocalMultiplayer;
         private ConnectionTab _activeTab = ConnectionTab.Host;
         private int _roundDurationIndex = 5;
         private int _roundCountIndex = 2;
@@ -78,6 +97,11 @@ namespace RetrowaveRocket
 
         private static void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
         {
+            if (scene.name == RetrowaveGameBootstrap.MainMenuSceneName)
+            {
+                EnsureEventSystemIsInputSystemCompatible();
+            }
+
             TryCreateController(scene);
         }
 
@@ -101,6 +125,7 @@ namespace RetrowaveRocket
         {
             yield return null;
             EnsureEventSystemIsInputSystemCompatible();
+            RetrowaveGameBootstrap.EnsureInstance();
 
             _menuManager = FindFirstObjectByType<UIMenuManager>();
 
@@ -183,7 +208,7 @@ namespace RetrowaveRocket
             rootRect.anchorMax = new Vector2(0.5f, 1f);
             rootRect.pivot = new Vector2(0.5f, 1f);
             rootRect.anchoredPosition = new Vector2(0f, -26f);
-            rootRect.sizeDelta = new Vector2(980f, 700f);
+            rootRect.sizeDelta = new Vector2(1040f, 840f);
 
             var rootImage = root.GetComponent<Image>();
             rootImage.color = new Color(0.04f, 0.06f, 0.12f, 0.95f);
@@ -201,25 +226,27 @@ namespace RetrowaveRocket
             rootLayout.childForceExpandHeight = false;
             rootLayout.childForceExpandWidth = true;
 
-            root.GetComponent<LayoutElement>().preferredWidth = 980f;
-            root.GetComponent<LayoutElement>().preferredHeight = 700f;
+            root.GetComponent<LayoutElement>().preferredWidth = 1040f;
+            root.GetComponent<LayoutElement>().preferredHeight = 840f;
 
             CreateHeaderText(root.transform, "Title", "PLAY THROTTLEBALL", 34f, FontStyles.Bold, Color.white, 44f);
-            CreateHeaderText(root.transform, "Body", "Switch between joining a running LAN server or hosting a custom procedural match with tuned round length, player cap, and arena scale.", 18f, FontStyles.Normal, new Color(0.86f, 0.91f, 0.96f, 1f), 48f);
+            CreateHeaderText(root.transform, "Body", "Choose a live multiplayer route, host or join a local LAN match, or enter the single-player Testing Arena for freeplay and onboarding.", 18f, FontStyles.Normal, new Color(0.86f, 0.91f, 0.96f, 1f), 48f);
 
-            BuildTabBar(root.transform);
+            BuildPlayTabBar(root.transform);
+            BuildLocalConnectionTabBar(root.transform);
             BuildContentPanels(root.transform);
 
-            _statusText = CreateHeaderText(root.transform, "Status", "Host creates the match on this machine. Join connects to another device on your LAN.", 17f, FontStyles.Normal, new Color(0.57f, 0.86f, 1f, 1f), 42f);
+            _statusText = CreateHeaderText(root.transform, "Status", "Local Multiplayer keeps the current Host and Join flow. Testing Arena launches a single-player warmup scene.", 17f, FontStyles.Normal, new Color(0.57f, 0.86f, 1f, 1f), 42f);
             _statusText.alignment = TextAlignmentOptions.MidlineLeft;
 
             BuildFooter(root.transform);
             UpdateHostSettingsSummary();
-            SelectTab(ConnectionTab.Host);
+            SelectPlayTab(PlayTab.LocalMultiplayer);
+            SelectConnectionTab(ConnectionTab.Host);
             _screenCanvasRoot.SetActive(_menuManager.playMenu.activeInHierarchy);
         }
 
-        private void BuildTabBar(Transform parent)
+        private void BuildPlayTabBar(Transform parent)
         {
             var tabRow = CreateUiObject("Tab Row", parent, typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
             var tabLayout = tabRow.GetComponent<HorizontalLayoutGroup>();
@@ -230,8 +257,24 @@ namespace RetrowaveRocket
             tabLayout.childForceExpandWidth = true;
             tabRow.GetComponent<LayoutElement>().preferredHeight = 52f;
 
-            (_joinTabButton, _joinTabImage) = CreateTabButton(tabRow.transform, "Join Game", () => SelectTab(ConnectionTab.Join));
-            (_hostTabButton, _hostTabImage) = CreateTabButton(tabRow.transform, "Host Game", () => SelectTab(ConnectionTab.Host));
+            (_multiplayerTabButton, _multiplayerTabImage) = CreateTabButton(tabRow.transform, "Play Multiplayer", () => SelectPlayTab(PlayTab.Multiplayer));
+            (_localMultiplayerTabButton, _localMultiplayerTabImage) = CreateTabButton(tabRow.transform, "Local Multiplayer", () => SelectPlayTab(PlayTab.LocalMultiplayer));
+            (_testingArenaTabButton, _testingArenaTabImage) = CreateTabButton(tabRow.transform, "Testing Arena", () => SelectPlayTab(PlayTab.TestingArena));
+        }
+
+        private void BuildLocalConnectionTabBar(Transform parent)
+        {
+            _localConnectionTabRow = CreateUiObject("Local Connection Tab Row", parent, typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
+            var tabLayout = _localConnectionTabRow.GetComponent<HorizontalLayoutGroup>();
+            tabLayout.spacing = 14f;
+            tabLayout.childControlHeight = true;
+            tabLayout.childControlWidth = true;
+            tabLayout.childForceExpandHeight = false;
+            tabLayout.childForceExpandWidth = true;
+            _localConnectionTabRow.GetComponent<LayoutElement>().preferredHeight = 46f;
+
+            (_joinTabButton, _joinTabImage) = CreateTabButton(_localConnectionTabRow.transform, "Join Game", () => SelectConnectionTab(ConnectionTab.Join));
+            (_hostTabButton, _hostTabImage) = CreateTabButton(_localConnectionTabRow.transform, "Host Game", () => SelectConnectionTab(ConnectionTab.Host));
         }
 
         private void BuildContentPanels(Transform parent)
@@ -239,13 +282,13 @@ namespace RetrowaveRocket
             var contentFrame = CreateUiObject("Content Frame", parent, typeof(RectTransform), typeof(Image), typeof(LayoutElement), typeof(ScrollRect));
             contentFrame.GetComponent<Image>().color = new Color(0.07f, 0.09f, 0.15f, 0.92f);
             contentFrame.GetComponent<Image>().raycastTarget = true;
-            contentFrame.GetComponent<LayoutElement>().preferredHeight = 340f;
+            contentFrame.GetComponent<LayoutElement>().preferredHeight = 400f;
 
             var contentRect = contentFrame.GetComponent<RectTransform>();
             contentRect.anchorMin = new Vector2(0.5f, 0.5f);
             contentRect.anchorMax = new Vector2(0.5f, 0.5f);
             contentRect.pivot = new Vector2(0.5f, 0.5f);
-            contentRect.sizeDelta = new Vector2(0f, 340f);
+            contentRect.sizeDelta = new Vector2(0f, 400f);
 
             var viewport = CreateUiObject("Viewport", contentFrame.transform, typeof(RectTransform), typeof(RectMask2D), typeof(Image));
             var viewportRect = viewport.GetComponent<RectTransform>();
@@ -271,8 +314,10 @@ namespace RetrowaveRocket
             handleRect.offsetMax = new Vector2(-1f, -1f);
             handleObject.GetComponent<Image>().color = new Color(0.2f, 0.82f, 1f, 0.95f);
 
+            _multiplayerPanel = CreateStretchPanel("Multiplayer Panel", viewport.transform);
             _joinPanel = CreateStretchPanel("Join Panel", viewport.transform);
             _hostPanel = CreateStretchPanel("Host Panel", viewport.transform);
+            _testingArenaPanel = CreateStretchPanel("Testing Arena Panel", viewport.transform);
 
             _contentScrollRect = contentFrame.GetComponent<ScrollRect>();
             _contentScrollRect.viewport = viewportRect;
@@ -292,8 +337,18 @@ namespace RetrowaveRocket
 
             _scrollHintText = CreateOverlayHint(contentFrame.transform, "ScrollHint", "Scroll to see more options");
 
+            BuildMultiplayerPanel(_multiplayerPanel.transform);
             BuildJoinPanel(_joinPanel.transform);
             BuildHostPanel(_hostPanel.transform);
+            BuildTestingArenaPanel(_testingArenaPanel.transform);
+        }
+
+        private void BuildMultiplayerPanel(Transform parent)
+        {
+            ConfigurePanelLayout(parent);
+            CreatePanelText(parent, "MultiplayerIntro", "Online matchmaking and remote playlist routing can live here once that service path is ready. For now, use Local Multiplayer to host or join a LAN match.", 18f, new Color(0.89f, 0.92f, 0.96f, 1f), 74f);
+            CreateValueRow(parent, "Status", "Not connected to an online service");
+            CreatePanelText(parent, "MultiplayerHint", "This tab keeps the Play menu scalable without changing the current LAN flow.", 16f, new Color(0.72f, 0.82f, 0.92f, 1f), 44f);
         }
 
         private void BuildJoinPanel(Transform parent)
@@ -325,6 +380,15 @@ namespace RetrowaveRocket
             BindDisplayNameField(_hostNameField, isHostField: true);
         }
 
+        private void BuildTestingArenaPanel(Transform parent)
+        {
+            ConfigurePanelLayout(parent);
+            CreatePanelText(parent, "TestArenaIntro", "Launch the Test Arena as a fully offline single-player freeplay warmup with controls onboarding, reactive tips, objective explanation, and live input, speed, boost, heat, and style readouts.", 18f, new Color(0.89f, 0.92f, 0.96f, 1f), 70f);
+            _testNameField = CreateInputRow(parent, "Display Name", RetrowaveGameBootstrap.Instance != null ? RetrowaveGameBootstrap.Instance.PreferredDisplayName : "Player", characterLimit: 24);
+            _testSummaryText = CreatePanelText(parent, "TestArenaSummary", "Loads the dedicated offline Test Arena scene with the live car, ball, boost, heat, style, crowd, music, and onboarding HUD systems already wired in.", 16f, new Color(0.59f, 0.86f, 1f, 1f), 68f);
+            BindDisplayNameField(_testNameField, isHostField: false);
+        }
+
         private void BuildFooter(Transform parent)
         {
             var footer = CreateUiObject("Footer", parent, typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
@@ -335,11 +399,11 @@ namespace RetrowaveRocket
             layout.childControlHeight = true;
             layout.childForceExpandWidth = false;
             layout.childForceExpandHeight = false;
-            footer.GetComponent<LayoutElement>().preferredHeight = 54f;
+            footer.GetComponent<LayoutElement>().preferredHeight = 64f;
 
-            _primaryActionButton = CreateActionButton(footer.transform, "Primary Action", "HOST MATCH", new Color(0.08f, 0.48f, 0.96f, 1f), HandlePrimaryActionClicked, 260f);
+            _primaryActionButton = CreateActionButton(footer.transform, "Primary Action", "HOST MATCH", new Color(0.08f, 0.48f, 0.96f, 1f), HandlePrimaryActionClicked, 336f);
             _primaryActionLabel = _primaryActionButton.GetComponentInChildren<TextMeshProUGUI>(true);
-            _backButton = CreateActionButton(footer.transform, "Back Action", "BACK", new Color(0.16f, 0.2f, 0.26f, 1f), HandleBackClicked, 180f);
+            _backButton = CreateActionButton(footer.transform, "Back Action", "BACK", new Color(0.16f, 0.2f, 0.26f, 1f), HandleBackClicked, 220f);
         }
 
         private void StepRoundDuration(int direction)
@@ -396,9 +460,69 @@ namespace RetrowaveRocket
                 ArenaSizeOptions[_arenaSizeIndex]);
         }
 
-        private void SelectTab(ConnectionTab tab)
+        private void SelectPlayTab(PlayTab tab)
+        {
+            _activePlayTab = tab;
+
+            if (_localConnectionTabRow != null)
+            {
+                _localConnectionTabRow.SetActive(tab == PlayTab.LocalMultiplayer);
+            }
+
+            ApplyTabVisual(_multiplayerTabButton, _multiplayerTabImage, tab == PlayTab.Multiplayer);
+            ApplyTabVisual(_localMultiplayerTabButton, _localMultiplayerTabImage, tab == PlayTab.LocalMultiplayer);
+            ApplyTabVisual(_testingArenaTabButton, _testingArenaTabImage, tab == PlayTab.TestingArena);
+
+            if (tab == PlayTab.LocalMultiplayer)
+            {
+                SelectConnectionTab(_activeTab);
+                return;
+            }
+
+            SetContentPanel(tab == PlayTab.Multiplayer ? _multiplayerPanel : _testingArenaPanel);
+
+            if (_joinPanel != null)
+            {
+                _joinPanel.SetActive(false);
+            }
+
+            if (_hostPanel != null)
+            {
+                _hostPanel.SetActive(false);
+            }
+
+            if (_multiplayerPanel != null)
+            {
+                _multiplayerPanel.SetActive(tab == PlayTab.Multiplayer);
+            }
+
+            if (_testingArenaPanel != null)
+            {
+                _testingArenaPanel.SetActive(tab == PlayTab.TestingArena);
+            }
+
+            if (_primaryActionLabel != null)
+            {
+                _primaryActionLabel.text = tab == PlayTab.Multiplayer ? "USE LOCAL" : "ENTER ARENA";
+            }
+
+            if (_statusText != null)
+            {
+                _statusText.text = tab == PlayTab.Multiplayer
+                    ? "Online playlists are a future lane. Local Multiplayer keeps the current host/join flow available now."
+                    : "Testing Arena loads the dedicated single-player warmup scene with onboarding HUD and live gameplay systems.";
+            }
+        }
+
+        private void SelectConnectionTab(ConnectionTab tab)
         {
             _activeTab = tab;
+            _activePlayTab = PlayTab.LocalMultiplayer;
+
+            if (_localConnectionTabRow != null)
+            {
+                _localConnectionTabRow.SetActive(true);
+            }
 
             if (_joinPanel != null)
             {
@@ -410,14 +534,21 @@ namespace RetrowaveRocket
                 _hostPanel.SetActive(tab == ConnectionTab.Host);
             }
 
-            if (_contentScrollRect != null)
+            if (_multiplayerPanel != null)
             {
-                _contentScrollRect.content = (tab == ConnectionTab.Join ? _joinPanel : _hostPanel).GetComponent<RectTransform>();
-                Canvas.ForceUpdateCanvases();
-                _contentScrollRect.verticalNormalizedPosition = 1f;
-                UpdateScrollIndicators();
+                _multiplayerPanel.SetActive(false);
             }
 
+            if (_testingArenaPanel != null)
+            {
+                _testingArenaPanel.SetActive(false);
+            }
+
+            SetContentPanel(tab == ConnectionTab.Join ? _joinPanel : _hostPanel);
+
+            ApplyTabVisual(_multiplayerTabButton, _multiplayerTabImage, false);
+            ApplyTabVisual(_localMultiplayerTabButton, _localMultiplayerTabImage, true);
+            ApplyTabVisual(_testingArenaTabButton, _testingArenaTabImage, false);
             ApplyTabVisual(_joinTabButton, _joinTabImage, tab == ConnectionTab.Join);
             ApplyTabVisual(_hostTabButton, _hostTabImage, tab == ConnectionTab.Host);
 
@@ -434,17 +565,45 @@ namespace RetrowaveRocket
             }
         }
 
+        private void SetContentPanel(GameObject panel)
+        {
+            if (_contentScrollRect == null || panel == null)
+            {
+                return;
+            }
+
+            _contentScrollRect.content = panel.GetComponent<RectTransform>();
+            Canvas.ForceUpdateCanvases();
+            _contentScrollRect.verticalNormalizedPosition = 1f;
+            UpdateScrollIndicators();
+        }
+
         private void HandlePrimaryActionClicked()
         {
-            if (RetrowaveGameBootstrap.Instance == null)
+            var bootstrap = RetrowaveGameBootstrap.EnsureInstance();
+
+            if (_activePlayTab == PlayTab.Multiplayer)
             {
-                _statusText.text = "Network bootstrap is missing.";
+                SelectPlayTab(PlayTab.LocalMultiplayer);
+                return;
+            }
+
+            if (_activePlayTab == PlayTab.TestingArena)
+            {
+                var displayName = _testNameField != null ? _testNameField.text : PreferredMenuDisplayName();
+
+                if (bootstrap.BeginTestArenaFromMenu(displayName, out var testArenaMessage))
+                {
+                    SetInteractable(false);
+                }
+
+                _statusText.text = testArenaMessage;
                 return;
             }
 
             if (_activeTab == ConnectionTab.Join)
             {
-                if (RetrowaveGameBootstrap.Instance.BeginClientFromMenu(_joinNameField.text, _joinAddressField.text, _joinPortField.text, out var joinMessage))
+                if (bootstrap.BeginClientFromMenu(_joinNameField.text, _joinAddressField.text, _joinPortField.text, out var joinMessage))
                 {
                     SetInteractable(false);
                 }
@@ -453,7 +612,7 @@ namespace RetrowaveRocket
                 return;
             }
 
-            if (RetrowaveGameBootstrap.Instance.BeginHostFromMenu(_hostNameField.text, _hostAddressField.text, _hostPortField.text, BuildHostSettings(), out var hostMessage))
+            if (bootstrap.BeginHostFromMenu(_hostNameField.text, _hostAddressField.text, _hostPortField.text, BuildHostSettings(), out var hostMessage))
             {
                 SetInteractable(false);
             }
@@ -497,27 +656,57 @@ namespace RetrowaveRocket
 
         private static void EnsureEventSystemIsInputSystemCompatible()
         {
-            var eventSystem = FindFirstObjectByType<EventSystem>();
+            var eventSystems = FindObjectsByType<EventSystem>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            EventSystem primaryEventSystem = null;
 
-            if (eventSystem == null)
+            if (eventSystems.Length == 0)
             {
                 var eventSystemObject = new GameObject("EventSystem", typeof(EventSystem), typeof(InputSystemUIInputModule));
-                eventSystemObject.GetComponent<InputSystemUIInputModule>().AssignDefaultActions();
+                primaryEventSystem = eventSystemObject.GetComponent<EventSystem>();
+                var newModule = eventSystemObject.GetComponent<InputSystemUIInputModule>();
+                newModule.AssignDefaultActions();
+                newModule.enabled = true;
+                primaryEventSystem.enabled = true;
+                eventSystemObject.SetActive(true);
                 return;
             }
 
-            var legacyModule = eventSystem.GetComponent<StandaloneInputModule>();
-            var inputSystemModule = eventSystem.GetComponent<InputSystemUIInputModule>();
-
-            if (inputSystemModule == null)
+            for (var i = 0; i < eventSystems.Length; i++)
             {
-                inputSystemModule = eventSystem.gameObject.AddComponent<InputSystemUIInputModule>();
+                var eventSystem = eventSystems[i];
+
+                if (eventSystem == null)
+                {
+                    continue;
+                }
+
+                var inputSystemModule = eventSystem.GetComponent<InputSystemUIInputModule>();
+
+                if (inputSystemModule == null)
+                {
+                    inputSystemModule = eventSystem.gameObject.AddComponent<InputSystemUIInputModule>();
+                }
+
                 inputSystemModule.AssignDefaultActions();
-            }
+                inputSystemModule.enabled = true;
 
-            if (legacyModule != null)
-            {
-                Destroy(legacyModule);
+                var legacyModule = eventSystem.GetComponent<StandaloneInputModule>();
+
+                if (legacyModule != null)
+                {
+                    Destroy(legacyModule);
+                }
+
+                if (primaryEventSystem == null)
+                {
+                    primaryEventSystem = eventSystem;
+                    primaryEventSystem.enabled = true;
+                    primaryEventSystem.gameObject.SetActive(true);
+                    continue;
+                }
+
+                eventSystem.enabled = false;
+                eventSystem.gameObject.SetActive(false);
             }
         }
 
@@ -652,32 +841,39 @@ namespace RetrowaveRocket
                 normalized = normalized[..24];
             }
 
-            if (fromHostField)
-            {
-                if (_joinNameField != null && _joinNameField.text != normalized)
-                {
-                    _joinNameField.text = normalized;
-                }
-
-                if (_hostNameField != null && _hostNameField.text != normalized)
-                {
-                    _hostNameField.text = normalized;
-                }
-            }
-            else
-            {
-                if (_hostNameField != null && _hostNameField.text != normalized)
-                {
-                    _hostNameField.text = normalized;
-                }
-
-                if (_joinNameField != null && _joinNameField.text != normalized)
-                {
-                    _joinNameField.text = normalized;
-                }
-            }
+            SyncDisplayNameField(_joinNameField, normalized);
+            SyncDisplayNameField(_hostNameField, normalized);
+            SyncDisplayNameField(_testNameField, normalized);
 
             _syncingDisplayNameFields = false;
+        }
+
+        private static void SyncDisplayNameField(TMP_InputField field, string value)
+        {
+            if (field != null && field.text != value)
+            {
+                field.text = value;
+            }
+        }
+
+        private string PreferredMenuDisplayName()
+        {
+            if (_hostNameField != null && !string.IsNullOrWhiteSpace(_hostNameField.text))
+            {
+                return _hostNameField.text;
+            }
+
+            if (_joinNameField != null && !string.IsNullOrWhiteSpace(_joinNameField.text))
+            {
+                return _joinNameField.text;
+            }
+
+            if (_testNameField != null && !string.IsNullOrWhiteSpace(_testNameField.text))
+            {
+                return _testNameField.text;
+            }
+
+            return RetrowaveGameBootstrap.Instance != null ? RetrowaveGameBootstrap.Instance.PreferredDisplayName : "Player";
         }
 
         private TMP_Text CreateValueRow(Transform parent, string label, string value)
@@ -688,7 +884,7 @@ namespace RetrowaveRocket
             var rowLayout = row.GetComponent<HorizontalLayoutGroup>();
             rowLayout.spacing = 14f;
             rowLayout.childControlHeight = true;
-            rowLayout.childControlWidth = false;
+            rowLayout.childControlWidth = true;
             rowLayout.childForceExpandHeight = false;
             rowLayout.childForceExpandWidth = false;
             rowLayout.childAlignment = TextAnchor.MiddleLeft;
@@ -697,6 +893,7 @@ namespace RetrowaveRocket
 
             var valueContainer = CreateUiObject($"{label} Value", row.transform, typeof(RectTransform), typeof(Image), typeof(LayoutElement));
             valueContainer.GetComponent<LayoutElement>().flexibleWidth = 1f;
+            valueContainer.GetComponent<LayoutElement>().minWidth = 360f;
             valueContainer.GetComponent<LayoutElement>().preferredHeight = 54f;
             valueContainer.GetComponent<Image>().color = new Color(0.08f, 0.1f, 0.16f, 1f);
             valueContainer.GetComponent<Image>().raycastTarget = false;
@@ -769,7 +966,7 @@ namespace RetrowaveRocket
         {
             var buttonObject = CreateUiObject(name, parent, typeof(RectTransform), typeof(Image), typeof(Button), typeof(LayoutElement));
             buttonObject.GetComponent<LayoutElement>().preferredWidth = width;
-            buttonObject.GetComponent<LayoutElement>().preferredHeight = 54f;
+            buttonObject.GetComponent<LayoutElement>().preferredHeight = 60f;
 
             var image = buttonObject.GetComponent<Image>();
             image.color = color;
@@ -787,7 +984,14 @@ namespace RetrowaveRocket
 
             var labelText = CreateTextElement(buttonObject.transform, "Label", label, 18f, Color.white);
             StretchToParent(labelText.rectTransform);
+            labelText.rectTransform.offsetMin = new Vector2(18f, 8f);
+            labelText.rectTransform.offsetMax = new Vector2(-18f, -8f);
             labelText.alignment = TextAlignmentOptions.Center;
+            labelText.enableAutoSizing = true;
+            labelText.fontSizeMin = 14f;
+            labelText.fontSizeMax = 18f;
+            labelText.textWrappingMode = TextWrappingModes.NoWrap;
+            labelText.overflowMode = TextOverflowModes.Ellipsis;
 
             RegisterInteractive(button);
             return button;

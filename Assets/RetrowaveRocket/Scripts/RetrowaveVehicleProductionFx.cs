@@ -38,7 +38,7 @@ namespace RetrowaveRocket
 
         private void Update()
         {
-            if (_player == null || !_player.IsSpawned || !_player.IsArenaParticipant)
+            if (_player == null || !_player.IsRuntimeActive || !_player.IsArenaParticipant)
             {
                 SetEmissionRate(_boostLeft, 0f);
                 SetEmissionRate(_boostRight, 0f);
@@ -227,6 +227,7 @@ namespace RetrowaveRocket
         private void UpdateBoostEffects()
         {
             var rate = 0f;
+            var density = RetrowaveGameSettings.VfxDensityMultiplier;
 
             if (_player.BoostFxActive)
             {
@@ -234,8 +235,8 @@ namespace RetrowaveRocket
                 rate *= Mathf.Lerp(1f, 1.35f, _player.HeatNormalized);
             }
 
-            SetEmissionRate(_boostLeft, rate);
-            SetEmissionRate(_boostRight, rate);
+            SetEmissionRate(_boostLeft, rate * density);
+            SetEmissionRate(_boostRight, rate * density);
 
             var teamColor = RetrowaveStyle.GetTeamGlow(_player.Team);
             var boostColor = _player.IsOvercharged
@@ -248,6 +249,7 @@ namespace RetrowaveRocket
         private void UpdateTireSparks()
         {
             var rate = 0f;
+            var density = RetrowaveGameSettings.VfxDensityMultiplier;
 
             if (_player.IsGroundedForHud && _body != null)
             {
@@ -262,8 +264,8 @@ namespace RetrowaveRocket
                 }
             }
 
-            SetEmissionRate(_sparkLeft, rate);
-            SetEmissionRate(_sparkRight, rate);
+            SetEmissionRate(_sparkLeft, rate * density);
+            SetEmissionRate(_sparkRight, rate * density);
         }
 
         private void UpdateStyleBursts()
@@ -280,20 +282,25 @@ namespace RetrowaveRocket
             switch (_player.LastStyleAwardEvent)
             {
                 case RetrowaveStyleEvent.CleanLanding:
-                    _landingBurst.Emit(42);
+                    _landingBurst.Emit(ScaleBurstCount(42));
                     TriggerFlash(new Color(0.46f, 1f, 0.52f, 1f), 0.32f);
                     RetrowaveArenaAudio.PlayImpact(transform.position, 0.52f);
                     break;
                 case RetrowaveStyleEvent.FlipTrick:
-                    _flipBurst.Emit(36);
+                    _flipBurst.Emit(ScaleBurstCount(36));
                     TriggerFlash(new Color(1f, 0.38f, 0.9f, 1f), 0.28f);
                     RetrowaveArenaAudio.PlayImpact(transform.position, 0.42f);
                     break;
                 case RetrowaveStyleEvent.ObjectiveCapture:
-                    _overdriveBurst.Emit(48);
+                    _overdriveBurst.Emit(ScaleBurstCount(48));
                     TriggerFlash(new Color(1f, 0.8f, 0.22f, 1f), 0.36f);
                     break;
             }
+        }
+
+        private static int ScaleBurstCount(int count)
+        {
+            return Mathf.Max(8, Mathf.RoundToInt(count * RetrowaveGameSettings.VfxDensityMultiplier));
         }
 
         private void TriggerFlash(Color color, float duration)

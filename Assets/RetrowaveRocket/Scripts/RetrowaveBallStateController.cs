@@ -31,6 +31,7 @@ namespace RetrowaveRocket
             NetworkVariableWritePermission.Server);
 
         private Rigidbody _body;
+        private RetrowaveBall _ball;
         private MeshRenderer _renderer;
         private Light _glow;
         private TrailRenderer _trail;
@@ -43,10 +44,14 @@ namespace RetrowaveRocket
         private void Awake()
         {
             _body = GetComponent<Rigidbody>();
+            _ball = GetComponent<RetrowaveBall>();
             _renderer = GetComponent<MeshRenderer>();
             _glow = GetComponentInChildren<Light>(true);
             EnsureTrail();
+            RefreshVisuals();
         }
+
+        private bool HasSimulationAuthority => IsServer || (_ball != null && _ball.IsOfflineMode);
 
         public override void OnNetworkSpawn()
         {
@@ -68,7 +73,7 @@ namespace RetrowaveRocket
 
         private void FixedUpdate()
         {
-            if (!IsServer)
+            if (!HasSimulationAuthority)
             {
                 return;
             }
@@ -101,7 +106,7 @@ namespace RetrowaveRocket
             ref float desiredVelocityChange,
             float touchStrength)
         {
-            if (!IsServer)
+            if (!HasSimulationAuthority)
             {
                 return;
             }
@@ -151,7 +156,7 @@ namespace RetrowaveRocket
 
         public void ResetStateServer()
         {
-            if (!IsServer)
+            if (!HasSimulationAuthority)
             {
                 return;
             }

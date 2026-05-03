@@ -25,6 +25,13 @@ namespace RetrowaveRocket
         Neon = 3,
     }
 
+    public enum RetrowaveVfxDensity
+    {
+        Low = 0,
+        Medium = 1,
+        High = 2,
+    }
+
     public static class RetrowaveGameSettings
     {
         private const string MusicVolumeKey = "MusicVolume";
@@ -38,6 +45,7 @@ namespace RetrowaveRocket
         private const string MotionBlurKey = "MotionBlur";
         private const string AmbientOcclusionKey = "AmbientOcclusion";
         private const string CameraEffectsKey = "CameraEffects";
+        private const string VfxDensityKey = "VfxDensity";
         private const string SensitivityXKey = "XSensitivity";
         private const string SensitivityYKey = "YSensitivity";
 
@@ -172,6 +180,22 @@ namespace RetrowaveRocket
             }
         }
 
+        public static RetrowaveVfxDensity VfxDensity
+        {
+            get
+            {
+                EnsureInitialized();
+                return (RetrowaveVfxDensity)Mathf.Clamp(PlayerPrefs.GetInt(VfxDensityKey, (int)RetrowaveVfxDensity.High), 0, 2);
+            }
+        }
+
+        public static float VfxDensityMultiplier => VfxDensity switch
+        {
+            RetrowaveVfxDensity.Low => 0.55f,
+            RetrowaveVfxDensity.Medium => 0.8f,
+            _ => 1f,
+        };
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void Install()
         {
@@ -182,6 +206,13 @@ namespace RetrowaveRocket
         {
             EnsureInitialized();
             PlayerPrefs.SetFloat(MusicVolumeKey, Mathf.Clamp01(value));
+            NotifyApplied(applyRuntimeSettings: false);
+        }
+
+        public static void SetSfxVolume(float value)
+        {
+            EnsureInitialized();
+            PlayerPrefs.SetFloat(SfxVolumeKey, Mathf.Clamp01(value));
             NotifyApplied(applyRuntimeSettings: false);
         }
 
@@ -248,6 +279,13 @@ namespace RetrowaveRocket
             NotifyApplied(applyRuntimeSettings: true);
         }
 
+        public static void SetVfxDensity(RetrowaveVfxDensity density)
+        {
+            EnsureInitialized();
+            PlayerPrefs.SetInt(VfxDensityKey, (int)density);
+            NotifyApplied(applyRuntimeSettings: false);
+        }
+
         public static void SetLookSensitivityX(float normalizedValue)
         {
             EnsureInitialized();
@@ -294,6 +332,7 @@ namespace RetrowaveRocket
             SetDefaultInt(MotionBlurKey, 0);
             SetDefaultInt(AmbientOcclusionKey, 1);
             SetDefaultInt(CameraEffectsKey, (int)RetrowaveCameraEffectPreset.Retro);
+            SetDefaultInt(VfxDensityKey, (int)RetrowaveVfxDensity.High);
             SetDefaultFloat(SensitivityXKey, DefaultSensitivityX);
             SetDefaultFloat(SensitivityYKey, DefaultSensitivityY);
         }

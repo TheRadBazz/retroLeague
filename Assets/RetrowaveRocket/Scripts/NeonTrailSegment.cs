@@ -38,12 +38,15 @@ namespace RetrowaveRocket
         private bool _affectEnemiesOnly;
         private bool _affectOwner;
         private float _spawnedAt;
+        private bool _offlineMode;
+        private bool HasSimulationAuthority => IsServer || _offlineMode;
 
         private void Awake()
         {
             _trigger = GetComponent<BoxCollider>();
             _trigger.isTrigger = true;
             EnsureVisual();
+            RefreshSize();
         }
 
         public override void OnNetworkSpawn()
@@ -58,6 +61,12 @@ namespace RetrowaveRocket
         {
             _segmentSize.OnValueChanged -= HandleSizeChanged;
             base.OnNetworkDespawn();
+        }
+
+        public void EnableOfflineMode()
+        {
+            _offlineMode = true;
+            RefreshSize();
         }
 
         private void Update()
@@ -113,9 +122,40 @@ namespace RetrowaveRocket
             StartCoroutine(ExpireRoutine(_lifetime.Value));
         }
 
+        public void InitializeOffline(
+            ulong ownerClientId,
+            RetrowaveTeam ownerTeam,
+            ulong sourceId,
+            Vector3 segmentSize,
+            float lifetime,
+            float stunDuration,
+            float stunImmunitySeconds,
+            float spinTorque,
+            bool affectEnemiesOnly,
+            bool affectOwner)
+        {
+            _offlineMode = true;
+            _ownerClientId.Value = ownerClientId;
+            _ownerTeam.Value = (int)ownerTeam;
+            _sourceId = sourceId;
+            _segmentSize.Value = new Vector3(
+                Mathf.Max(0.1f, segmentSize.x),
+                Mathf.Max(0.1f, segmentSize.y),
+                Mathf.Max(0.1f, segmentSize.z));
+            _lifetime.Value = Mathf.Max(0.1f, lifetime);
+            _stunDuration = Mathf.Max(0.05f, stunDuration);
+            _stunImmunitySeconds = Mathf.Max(0f, stunImmunitySeconds);
+            _spinTorque = Mathf.Max(0f, spinTorque);
+            _affectEnemiesOnly = affectEnemiesOnly;
+            _affectOwner = affectOwner;
+            _spawnedAt = Time.time;
+            RefreshSize();
+            StartCoroutine(ExpireRoutine(_lifetime.Value));
+        }
+
         private void OnTriggerEnter(Collider other)
         {
-            if (!IsServer || !TryResolvePlayer(other, out var player) || !CanAffect(player))
+            if (!HasSimulationAuthority || !TryResolvePlayer(other, out var player) || !CanAffect(player))
             {
                 return;
             }
@@ -171,7 +211,11 @@ namespace RetrowaveRocket
         {
             yield return new WaitForSeconds(lifetime);
 
-            if (IsServer && NetworkObject != null && NetworkObject.IsSpawned)
+            if (_offlineMode)
+            {
+                Destroy(gameObject);
+            }
+            else if (IsServer && NetworkObject != null && NetworkObject.IsSpawned)
             {
                 NetworkObject.Despawn(true);
             }

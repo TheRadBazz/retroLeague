@@ -28,7 +28,9 @@ namespace RetrowaveRocket
                 return false;
             }
 
-            var domeObject = RetrowaveGameBootstrap.Instance.CreateChronoDomeFieldInstance();
+            var domeObject = owner.IsOfflineMode
+                ? RetrowaveGameBootstrap.Instance.CreateOfflineChronoDomeFieldInstance()
+                : RetrowaveGameBootstrap.Instance.CreateChronoDomeFieldInstance();
 
             if (domeObject == null)
             {
@@ -40,29 +42,61 @@ namespace RetrowaveRocket
             domeObject.transform.SetPositionAndRotation(position, Quaternion.identity);
             RetrowaveGameBootstrap.Instance.MoveRuntimeInstanceToGameplayScene(domeObject);
 
-            var networkObject = domeObject.GetComponent<NetworkObject>();
             var field = domeObject.GetComponent<ChronoDomeField>();
 
-            if (networkObject == null || field == null)
+            if (field == null)
             {
                 Destroy(domeObject);
                 return false;
             }
 
-            networkObject.Spawn();
-            field.InitializeServer(
-                owner.OwnerClientId,
-                owner.Team,
-                _radius,
-                _duration * owner.StatusEffectDurationMultiplier,
-                _enemyMovementMultiplier,
-                _enemySteeringMultiplier,
-                _affectFriendlyPlayers,
-                _hardFreeze,
-                _affectBall,
-                _ballVelocityDampingPerTick,
-                _tickRate);
-            PlayDeployCueClientRpc(position);
+            if (owner.IsOfflineMode)
+            {
+                field.EnableOfflineMode();
+                field.InitializeOffline(
+                    owner.ControllingClientId,
+                    owner.Team,
+                    _radius,
+                    _duration * owner.StatusEffectDurationMultiplier,
+                    _enemyMovementMultiplier,
+                    _enemySteeringMultiplier,
+                    _affectFriendlyPlayers,
+                    _hardFreeze,
+                    _affectBall,
+                    _ballVelocityDampingPerTick,
+                    _tickRate);
+
+                if (_deployCue != null)
+                {
+                    RetrowaveArenaAudio.PlayRarePowerCue(_deployCue, position, 0.96f);
+                }
+            }
+            else
+            {
+                var networkObject = domeObject.GetComponent<NetworkObject>();
+
+                if (networkObject == null)
+                {
+                    Destroy(domeObject);
+                    return false;
+                }
+
+                networkObject.Spawn();
+                field.InitializeServer(
+                    owner.OwnerClientId,
+                    owner.Team,
+                    _radius,
+                    _duration * owner.StatusEffectDurationMultiplier,
+                    _enemyMovementMultiplier,
+                    _enemySteeringMultiplier,
+                    _affectFriendlyPlayers,
+                    _hardFreeze,
+                    _affectBall,
+                    _ballVelocityDampingPerTick,
+                    _tickRate);
+                PlayDeployCueClientRpc(position);
+            }
+
             return true;
         }
 
