@@ -75,8 +75,11 @@ namespace RetrowaveRocket
         private const string YughuesBallMaterialAssetPath = "Assets/YughuesFreeMetalMaterials/Materials/M_YFMeM_49.mat";
         private const string YughuesBallMaterialResourcePath = "RetrowaveRocket/M_YFMeM_49_Ball";
         private const float YughuesBallTextureTiling = 2.2f;
-        private const uint NetworkSimulationTickRate = 50;
-        private const int ClientInterpolationBufferTicks = 1;
+        private const uint NetworkSimulationTickRate = 60;
+        private const int ClientInterpolationBufferTicks = 2;
+        private const int LanPacketQueueSize = 512;
+        private const float GameplayFixedDeltaTime = 1f / 60f;
+        private const float PhysicsNetworkInterpolationSeconds = 0.05f;
         private const float RoleSelectionRequestTimeoutSeconds = 2f;
         private static readonly Color BallSurfaceTint = new Color(0.66f, 0.7f, 0.76f, 1f);
         private static readonly Color BallSurfaceEmission = new Color(0.9f, 0.9f, 0.9f, 1f);
@@ -710,12 +713,15 @@ namespace RetrowaveRocket
 
             _networkManager = _networkRuntimeRoot.AddComponent<NetworkManager>();
             _transport = _networkRuntimeRoot.AddComponent<UnityTransport>();
+            _transport.MaxPacketQueueSize = LanPacketQueueSize;
             _networkManager.NetworkConfig ??= new NetworkConfig();
             _networkManager.NetworkConfig.NetworkTransport = _transport;
             _networkManager.NetworkConfig.EnableSceneManagement = false;
             _networkManager.NetworkConfig.ConnectionApproval = false;
             _networkManager.NetworkConfig.SpawnTimeout = 5f;
             _networkManager.NetworkConfig.TickRate = NetworkSimulationTickRate;
+            _networkManager.NetworkConfig.EnableTimeResync = true;
+            _networkManager.NetworkConfig.TimeResyncInterval = 10;
             _networkManager.NetworkConfig.EnsureNetworkVariableLengthSafety = true;
             NetworkTransform.InterpolationBufferTickOffset = ClientInterpolationBufferTicks;
 
@@ -5434,6 +5440,7 @@ namespace RetrowaveRocket
         {
             if (IsGameplayScene(scene))
             {
+                ApplyGameplayPhysicsTiming();
                 RetrowaveArenaBuilder.EnsureBuilt();
                 RetrowaveArenaBuilder.SetActive(true);
                 RetrowaveCameraRig.EnsureCamera();
@@ -5445,6 +5452,7 @@ namespace RetrowaveRocket
 
             if (IsTestArenaScene(scene))
             {
+                ApplyGameplayPhysicsTiming();
                 RetrowaveArenaBuilder.EnsureBuilt();
                 RetrowaveArenaBuilder.SetActive(true);
                 RetrowaveCameraRig.EnsureCamera();
@@ -5457,6 +5465,7 @@ namespace RetrowaveRocket
                 return;
             }
 
+            RestoreDefaultPhysicsTiming();
             RetrowaveArenaBuilder.SetActive(false);
             ClearPodiumPresentation();
             DestroyGameplayMenuOverlay();
@@ -5481,7 +5490,26 @@ namespace RetrowaveRocket
         {
             var clampedScale = Mathf.Clamp(scale, 0.05f, 1f);
             Time.timeScale = clampedScale;
-            Time.fixedDeltaTime = _defaultFixedDeltaTime * clampedScale;
+            Time.fixedDeltaTime = GetActiveFixedDeltaTimeBase() * clampedScale;
+        }
+
+        private void ApplyGameplayPhysicsTiming()
+        {
+            Time.fixedDeltaTime = GameplayFixedDeltaTime * Mathf.Clamp(Time.timeScale, 0.05f, 1f);
+        }
+
+        private void RestoreDefaultPhysicsTiming()
+        {
+            Time.timeScale = 1f;
+            Time.fixedDeltaTime = _defaultFixedDeltaTime;
+        }
+
+        private float GetActiveFixedDeltaTimeBase()
+        {
+            var scene = SceneManager.GetActiveScene();
+            return IsGameplayScene(scene) || IsTestArenaScene(scene)
+                ? GameplayFixedDeltaTime
+                : _defaultFixedDeltaTime;
         }
 
         private static bool IsGameplayScene(Scene scene)
@@ -5608,8 +5636,9 @@ namespace RetrowaveRocket
             networkTransform.ScaleInterpolationType = NetworkTransform.InterpolationTypes.Lerp;
             networkTransform.PositionLerpSmoothing = true;
             networkTransform.RotationLerpSmoothing = true;
-            networkTransform.PositionMaxInterpolationTime = 0.075f;
-            networkTransform.RotationMaxInterpolationTime = 0.075f;
+            networkTransform.UseHalfFloatPrecision = false;
+            networkTransform.PositionMaxInterpolationTime = PhysicsNetworkInterpolationSeconds;
+            networkTransform.RotationMaxInterpolationTime = PhysicsNetworkInterpolationSeconds;
         }
 
         private static Material CreateBallSurfaceMaterial()

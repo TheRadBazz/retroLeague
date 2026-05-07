@@ -19,6 +19,7 @@ namespace RetrowaveRocket
         public bool JumpPressed;
         public bool JumpHeld;
         public bool ResetPressed;
+        public uint Sequence;
 
         public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
         {
@@ -30,6 +31,7 @@ namespace RetrowaveRocket
             serializer.SerializeValue(ref JumpPressed);
             serializer.SerializeValue(ref JumpHeld);
             serializer.SerializeValue(ref ResetPressed);
+            serializer.SerializeValue(ref Sequence);
         }
 
         public bool Equals(RetrowavePlayerInputState other)
@@ -41,7 +43,8 @@ namespace RetrowaveRocket
                    && Brake == other.Brake
                    && JumpPressed == other.JumpPressed
                    && JumpHeld == other.JumpHeld
-                   && ResetPressed == other.ResetPressed;
+                   && ResetPressed == other.ResetPressed
+                   && Sequence == other.Sequence;
         }
     }
 
@@ -64,6 +67,7 @@ namespace RetrowaveRocket
         private const float OwnerVisualSmoothingTime = 0.045f;
         private const float OwnerVisualRotationBlendRate = 18f;
         private const float OwnerVisualTeleportDistanceSqr = 9f;
+        private const float ReplicatedVelocityChangeThresholdSqr = 0.16f;
 
         private readonly NetworkVariable<int> _teamValue = new(
             (int)RetrowaveTeam.Blue,
@@ -97,6 +101,16 @@ namespace RetrowaveRocket
 
         private readonly NetworkVariable<float> _replicatedSpeed = new(
             0f,
+            NetworkVariableReadPermission.Everyone,
+            NetworkVariableWritePermission.Server);
+
+        private readonly NetworkVariable<Vector3> _replicatedVelocity = new(
+            Vector3.zero,
+            NetworkVariableReadPermission.Everyone,
+            NetworkVariableWritePermission.Server);
+
+        private readonly NetworkVariable<bool> _replicatedGrounded = new(
+            false,
             NetworkVariableReadPermission.Everyone,
             NetworkVariableWritePermission.Server);
 
@@ -183,6 +197,9 @@ namespace RetrowaveRocket
         private bool _serverJumpQueued;
         private bool _serverResetQueued;
         private bool _offlineMode;
+        private uint _localInputSequence;
+        private uint _lastReceivedInputSequence;
+        private bool _hasReceivedInputSequence;
 
         public static RetrowavePlayerController LocalOwner { get; private set; }
         public static RetrowavePlayerController LocalPlayer { get; private set; }
@@ -203,7 +220,7 @@ namespace RetrowaveRocket
         public float CurrentSpeed => ResolveCurrentSpeed();
         public float MaxHudSpeed => RetrowaveVehicleMovementCore.MaxBoostSpeed * RetrowaveArenaConfig.SpeedBurstMultiplier;
         public float SpeedNormalized => Mathf.Clamp01(CurrentSpeed / Mathf.Max(0.01f, MaxHudSpeed));
-        public bool IsGroundedForHud => _isGrounded;
+        public bool IsGroundedForHud => HasSimulationAuthority ? _isGrounded : _replicatedGrounded.Value;
         public Rigidbody Body => _rigidbody;
         public ulong ControllingClientId => _offlineMode ? 0UL : OwnerClientId;
         public bool BoostFxActive => _boostFx.Value;
@@ -357,6 +374,7 @@ namespace RetrowaveRocket
                     JumpPressed = _jumpQueued,
                     JumpHeld = _cachedJumpHeld,
                     ResetPressed = _resetQueued,
+                    Sequence = ++_localInputSequence,
                 };
 
                 if (HasSimulationAuthority)
@@ -476,6 +494,7 @@ namespace RetrowaveRocket
             _smoothedSpeed = 0f;
             _speedSmoothVelocity = 0f;
             _hasObservedPosition = false;
+            _hasReceivedInputSequence = false;
 
             base.OnNetworkDespawn();
         }
@@ -550,7 +569,14 @@ namespace RetrowaveRocket
                 return;
             }
 
-            if (displacement.sqrMagnitude > ObservedVelocityMinDisplacementSqr)
+            var replicatedVelocity = _replicatedVelocity.Value;
+
+            if (!HasSimulationAuthority && replicatedVelocity.sqrMagnitude > 0.25f)
+            {
+                var replicatedBlend = 1f - Mathf.Exp(-deltaTime * ClientVelocityProbeBlendRate);
+                _observedVelocity = Vector3.Lerp(_observedVelocity, replicatedVelocity, replicatedBlend);
+            }
+            else if (displacement.sqrMagnitude > ObservedVelocityMinDisplacementSqr)
             {
                 var rawVelocity = displacement / deltaTime;
                 var probeBlend = 1f - Mathf.Exp(-deltaTime * ClientVelocityProbeBlendRate);
@@ -572,11 +598,13 @@ namespace RetrowaveRocket
                 _speedSmoothVelocity = 0f;
             }
 
-            var direction = _observedVelocity.sqrMagnitude > 0.25f
-                ? _observedVelocity.normalized
-                : _smoothedVelocity.sqrMagnitude > 0.25f
-                    ? _smoothedVelocity.normalized
-                    : transform.forward;
+            var direction = replicatedVelocity.sqrMagnitude > 0.25f
+                ? replicatedVelocity.normalized
+                : _observedVelocity.sqrMagnitude > 0.25f
+                    ? _observedVelocity.normalized
+                    : _smoothedVelocity.sqrMagnitude > 0.25f
+                        ? _smoothedVelocity.normalized
+                        : transform.forward;
             var targetVelocity = direction * _smoothedSpeed;
             var displayBlend = 1f - Mathf.Exp(-deltaTime * ClientVelocityDisplayBlendRate);
             _smoothedVelocity = Vector3.Lerp(_smoothedVelocity, targetVelocity, displayBlend);
@@ -595,6 +623,11 @@ namespace RetrowaveRocket
         [ServerRpc(Delivery = RpcDelivery.Unreliable)]
         private void SubmitInputServerRpc(RetrowavePlayerInputState input)
         {
+            if (!IsNewerInputSequence(input.Sequence))
+            {
+                return;
+            }
+
             input.JumpPressed = false;
             input.ResetPressed = false;
             _latestInput = input;
@@ -610,6 +643,30 @@ namespace RetrowaveRocket
         private void SubmitResetPressedServerRpc()
         {
             _serverResetQueued = true;
+        }
+
+        private bool IsNewerInputSequence(uint sequence)
+        {
+            if (!_hasReceivedInputSequence)
+            {
+                _hasReceivedInputSequence = true;
+                _lastReceivedInputSequence = sequence;
+                return true;
+            }
+
+            if (sequence == _lastReceivedInputSequence)
+            {
+                return false;
+            }
+
+            var isNewer = unchecked((int)(sequence - _lastReceivedInputSequence)) > 0;
+
+            if (isNewer)
+            {
+                _lastReceivedInputSequence = sequence;
+            }
+
+            return isNewer;
         }
 
         [ServerRpc]
@@ -1377,7 +1434,10 @@ namespace RetrowaveRocket
                 return;
             }
 
-            SetReplicatedSpeedServer(_rigidbody.linearVelocity.magnitude);
+            var velocity = _rigidbody.linearVelocity;
+            SetReplicatedSpeedServer(velocity.magnitude);
+            SetReplicatedVelocityServer(velocity);
+            SetReplicatedGroundedServer(_isGrounded);
         }
 
         private void SetReplicatedSpeedServer(float speed)
@@ -1392,6 +1452,38 @@ namespace RetrowaveRocket
             if (Mathf.Abs(_replicatedSpeed.Value - clampedSpeed) > 0.04f || clampedSpeed < 0.04f)
             {
                 _replicatedSpeed.Value = clampedSpeed;
+            }
+
+            if (clampedSpeed < 0.04f && _replicatedVelocity.Value.sqrMagnitude > 0.0001f)
+            {
+                _replicatedVelocity.Value = Vector3.zero;
+            }
+        }
+
+        private void SetReplicatedVelocityServer(Vector3 velocity)
+        {
+            if (!HasSimulationAuthority)
+            {
+                return;
+            }
+
+            if ((velocity - _replicatedVelocity.Value).sqrMagnitude > ReplicatedVelocityChangeThresholdSqr
+                || velocity.sqrMagnitude < 0.0016f)
+            {
+                _replicatedVelocity.Value = velocity;
+            }
+        }
+
+        private void SetReplicatedGroundedServer(bool grounded)
+        {
+            if (!HasSimulationAuthority)
+            {
+                return;
+            }
+
+            if (_replicatedGrounded.Value != grounded)
+            {
+                _replicatedGrounded.Value = grounded;
             }
         }
 

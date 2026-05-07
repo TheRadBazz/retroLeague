@@ -253,8 +253,9 @@ namespace RetrowaveRocket
 
             if (_player.IsGroundedForHud && _body != null)
             {
-                var localVelocity = transform.InverseTransformDirection(_body.linearVelocity);
-                var speed = _body.linearVelocity.magnitude;
+                var velocity = _player.CurrentVelocity;
+                var localVelocity = transform.InverseTransformDirection(velocity);
+                var speed = velocity.magnitude;
                 var lateral = Mathf.Abs(localVelocity.x);
 
                 if (speed > _tireSparkMinSpeed && lateral > _tireSparkMinLateralSpeed)
